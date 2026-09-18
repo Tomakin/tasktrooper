@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import os from "node:os";
 import { app } from "electron";
 import type {
   Blocker,
@@ -428,6 +429,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
           postgresCacheDir: postgresCacheDir(),
           apiToken: secrets.api_token,
           mcpSecretsKey: secrets.mcp_secrets_key,
+          homeDir: os.homedir(),
           ...(embeddingsBaseURL !== null ? { embeddingsBaseURL } : {}),
         }),
         restart: true,

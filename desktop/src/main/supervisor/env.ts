@@ -82,6 +82,7 @@ export const SERVER_CONTRACT_KEYS = [
   "EMBEDDED_POSTGRES_CACHE_DIR",
   "CHROME_BIN",
   "MOBILE_APPIUM_HUB_URL",
+  "ALLOWED_ROOTS",
 ] as const;
 
 export interface AgentServerEnvInputs {
@@ -96,6 +97,12 @@ export interface AgentServerEnvInputs {
   mcpSecretsKey: string;
   /** The embedder child's resolved loopback URL, when it has bound one. */
   embeddingsBaseURL?: string;
+  /**
+   * `ALLOWED_ROOTS`: the user's home. "Open Code Repository" takes any folder
+   * the user picks, and the backend refuses everything outside its managed
+   * workspace unless told otherwise — config.yml cannot, it is inside the bundle.
+   */
+  homeDir: string;
 }
 
 /**
@@ -134,6 +141,7 @@ export function agentServerEnv(inputs: AgentServerEnvInputs): NodeJS.ProcessEnv 
     EMBEDDED_POSTGRES_CACHE_DIR: inputs.postgresCacheDir,
     SERVER_API_KEY: inputs.apiToken,
     MCP_SECRETS_KEY: inputs.mcpSecretsKey,
+    ALLOWED_ROOTS: inputs.homeDir,
     ...(claude?.status === "ok" && claude.path ? { CLAUDE_CODE_BIN: claude.path } : {}),
     ...(cursorAgent?.status === "ok" && cursorAgent.path ? { CURSOR_AGENT_BIN: cursorAgent.path } : {}),
     ...(antigravity?.status === "ok" && antigravity.path ? { ANTIGRAVITY_BIN: antigravity.path } : {}),

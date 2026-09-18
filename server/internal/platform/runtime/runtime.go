@@ -194,6 +194,10 @@ type Options struct {
 	// Set, it is bootstrapped into an embedding provider at boot so RAG works
 	// without anyone opening the settings page.
 	EmbeddingsBaseURL string
+	// AllowedRoots widen indexer.allowed_roots. The desktop app's config.yml
+	// is read-only inside the bundle, so without this a folder the user picked
+	// outside the managed workspace could never be opened.
+	AllowedRoots []string
 	// PublicBaseURL is the origin a Claude Code session calls TaskTrooper's own
 	// tools back on. Empty until the listener is bound — with PORT=0 nobody
 	// knows the port before then — so Run fills it in, and a reload then
@@ -662,6 +666,7 @@ func applyLocalOverrides(cfg *domain.Config, opts Options) {
 	if opts.Port == 0 {
 		cfg.Server.Port = 0
 	}
+	cfg.Indexer.AllowedRoots = append(cfg.Indexer.AllowedRoots, opts.AllowedRoots...)
 }
 
 func (e *engine) registerBuiltinTools(cfg *domain.Config) error {

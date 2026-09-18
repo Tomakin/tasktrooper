@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -99,6 +100,30 @@ func TestOptionsFromEnv(t *testing.T) {
 		want := []string{"https://a.example", "https://b.example"}
 		if len(cfg.Options.CORSOrigins) != 2 || cfg.Options.CORSOrigins[0] != want[0] || cfg.Options.CORSOrigins[1] != want[1] {
 			t.Fatalf("cors = %v", cfg.Options.CORSOrigins)
+		}
+	})
+
+	t.Run("allowed roots split like PATH", func(t *testing.T) {
+		env := validEnv()
+		sep := string(filepath.ListSeparator)
+		env["ALLOWED_ROOTS"] = "/home/me/code, with comma" + sep + sep + " /srv/repos "
+		cfg, err := optionsFromEnv(fakeEnv(env))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"/home/me/code, with comma", "/srv/repos"}
+		if len(cfg.Options.AllowedRoots) != 2 || cfg.Options.AllowedRoots[0] != want[0] || cfg.Options.AllowedRoots[1] != want[1] {
+			t.Fatalf("allowed roots = %q, want %q", cfg.Options.AllowedRoots, want)
+		}
+	})
+
+	t.Run("no allowed roots by default", func(t *testing.T) {
+		cfg, err := optionsFromEnv(fakeEnv(validEnv()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.Options.AllowedRoots) != 0 {
+			t.Fatalf("allowed roots = %q, want none", cfg.Options.AllowedRoots)
 		}
 	})
 

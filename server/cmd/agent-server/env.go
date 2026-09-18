@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -102,11 +103,24 @@ func optionsFromEnv(getenv func(string) string) (localConfig, error) {
 			LazyMCP:           true,
 			CORSOrigins:       corsOriginsFromEnv(getenv("CORS_ORIGINS")),
 			EmbeddingsBaseURL: strings.TrimSpace(getenv("EMBEDDINGS_BASE_URL")),
+			AllowedRoots:      allowedRootsFromEnv(getenv("ALLOWED_ROOTS")),
 		},
 		PostgresDSN:    dsn,
 		PostgresBinDir: strings.TrimSpace(getenv("EMBEDDED_POSTGRES_CACHE_DIR")),
 		ShutdownGrace:  shutdownGraceFromEnv(getenv),
 	}, nil
+}
+
+// allowedRootsFromEnv splits on the OS path-list separator, like PATH, because
+// a comma is a legal character in a directory name.
+func allowedRootsFromEnv(raw string) []string {
+	var out []string
+	for _, part := range filepath.SplitList(raw) {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func corsOriginsFromEnv(raw string) []string {

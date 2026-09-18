@@ -65,6 +65,7 @@ Optional:
 | `SHUTDOWN_ON_STDIN_CLOSE` | no | `1` makes stdin EOF start the same drain as SIGTERM. The desktop app sets it so the server stops cleanly on Windows and never outlives the app. |
 | `EMBEDDED_POSTGRES_CACHE_DIR` | `$DATA_DIR/postgres-bin` | Where the Postgres binaries are downloaded and extracted (~30 MB, first start only) |
 | `EMBEDDINGS_BASE_URL` | — | OpenAI-compatible host exposing `POST /v1/embeddings`. Set, an embedding provider pointing at it (`nomic-embed-text-v1.5`, 768 dims) is created at boot. Idempotent. |
+| `ALLOWED_ROOTS` | — | Extra directories a repository or session may be opened from, on top of `indexer.allowed_roots` and the managed workspace. OS path-list separated (`:` / `;`), like `PATH`. The desktop app sets it to the user's home. |
 | `CORS_ORIGINS` | `app://tasktrooper,http://localhost:3200,http://127.0.0.1:3200` | Origins allowed to call this server |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:<port>` | The origin a Claude Code session calls TaskTrooper's tools back on |
 | `CLAUDE_CODE_BIN` | `claude` | The Claude Code CLI |

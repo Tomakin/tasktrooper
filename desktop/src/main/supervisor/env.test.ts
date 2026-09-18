@@ -25,6 +25,7 @@ const env = (extra: PreflightReport["items"] = [], embeddingsBaseURL?: string): 
     postgresCacheDir: "/userData/postgres-bin",
     apiToken: "token-1",
     mcpSecretsKey: "key-1",
+    homeDir: "/home/me",
     ...(embeddingsBaseURL !== undefined ? { embeddingsBaseURL } : {}),
   });
 
@@ -59,6 +60,14 @@ describe("agentServerEnv", () => {
     expect(e.MCP_SECRETS_KEY).toBe("key-1");
     expect(e.DATA_DIR).toBe("/userData/data");
     expect(e.EMBEDDED_POSTGRES_CACHE_DIR).toBe("/userData/postgres-bin");
+  });
+
+  /**
+   * Without it the backend refuses every folder outside its own workspace, so
+   * "Open Code Repository" on ~/code/app fails with "outside allowed roots".
+   */
+  it("lets the backend open repositories anywhere under the user's home", () => {
+    expect(env().ALLOWED_ROOTS).toBe("/home/me");
   });
 
   /**

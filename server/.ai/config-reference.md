@@ -222,7 +222,9 @@ every call — no restart needed.
 `allowed_roots` only ever WIDENS the set. Empty means nothing extra — not
 "anywhere", which is what it used to mean and what let `POST /v1/repositories/open`
 index any readable directory on this host. Set it only when this install keeps
-its checkouts outside the managed workspace.
+its checkouts outside the managed workspace. The `ALLOWED_ROOTS` environment
+variable appends to it; the desktop app sets that to the user's home, because
+its bundled config.yml is read-only.
 
 pgvector: migration 036 tries `vector` + `pg_trgm` (image `pgvector/pgvector:pg16`).
 With them, workspace chunk search uses an HNSW index and text search a trigram+RRF

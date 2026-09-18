@@ -3,6 +3,7 @@ package chunker_test
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/suite"
 
@@ -69,6 +70,23 @@ func (s *SitterChunkerSuite) TestTSSignatureAndContent() {
 	s.Equal("loadUser", chunks[0].SymbolName)
 	s.Contains(chunks[0].Signature, "loadUser(id: string): Promise<User>")
 	s.Contains(chunks[0].Content, "db.users.find(id)")
+}
+
+// A long signature is clipped, and the cut must not land inside a multi-byte
+// rune: Postgres refuses the half character ("invalid byte sequence for
+// encoding UTF8") and the whole index run fails with it.
+func (s *SitterChunkerSuite) TestLongSignatureClipsOnRuneBoundary() {
+	params := strings.Repeat("ı", 150)
+	// Two names of different parity so one of them puts the cut mid-rune.
+	src := []byte("export function f(" + params + ": string) {\n  return 1;\n}\n\n" +
+		"export function fx(" + params + ": string) {\n  return 2;\n}\n")
+	chunks, err := chunker.TSChunker{}.Chunk("src/lib/uzun.ts", src)
+	s.Require().NoError(err)
+	s.Require().NotEmpty(chunks)
+	for _, ch := range chunks {
+		s.True(utf8.ValidString(ch.Signature), "signature of %s is not valid UTF-8: %q", ch.SymbolName, ch.Signature)
+		s.True(strings.HasSuffix(ch.Signature, "…"), "signature of %s was not clipped", ch.SymbolName)
+	}
 }
 
 func (s *SitterChunkerSuite) TestSwiftStructProtocolAndMembers() {

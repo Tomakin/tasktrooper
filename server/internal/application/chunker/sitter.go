@@ -9,6 +9,7 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/treesitter"
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
 const (
@@ -239,7 +240,9 @@ func (c *sitterCollector) signature(node *sitter.Node) string {
 	text = strings.TrimRight(text, "{(=")
 	text = strings.TrimSpace(text)
 	if len(text) > maxSignatureChars {
-		text = text[:maxSignatureChars] + "…"
+		// Cut on a rune boundary: half a multi-byte character is invalid
+		// UTF-8, and Postgres rejects the symbol row and the whole index run.
+		text = domain.TruncateHead(text, maxSignatureChars) + "…"
 	}
 	return text
 }

@@ -53,6 +53,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/settings"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/vercelops"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/webauth"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -120,6 +121,7 @@ type Handler struct {
 	billingSvc        *billing.Service
 	uiRoot            string
 	uiFS              fs.FS
+	webAuth           *webauth.Service
 	deploySvc         *deploy.Service
 	repoDocsSvc       *repodocs.Service
 	prodOpsSvc        *prodops.Service
@@ -176,6 +178,9 @@ type Config struct {
 	BillingSvc        *billing.Service
 	UIRoot            string
 	UIFS              fs.FS
+	// WebAuth enables browser sign-in beside the bearer token. Nil keeps the
+	// bearer as the only credential.
+	WebAuth           *webauth.Service
 	DeploySvc         *deploy.Service
 	RepoDocsSvc       *repodocs.Service
 	ProdOpsSvc        *prodops.Service
@@ -233,6 +238,7 @@ func NewHandler(cfg Config) *Handler {
 		billingSvc:        cfg.BillingSvc,
 		uiRoot:            cfg.UIRoot,
 		uiFS:              cfg.UIFS,
+		webAuth:           cfg.WebAuth,
 		deploySvc:         cfg.DeploySvc,
 		repoDocsSvc:       cfg.RepoDocsSvc,
 		prodOpsSvc:        cfg.ProdOpsSvc,
@@ -324,6 +330,7 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 
 	h.registerOrchestrationRoutes(app)
 	h.registerMCPRoutes(app)
+	h.registerWebAuthRoutes(app)
 
 	// The per-run MCP tool endpoint a Claude Code session calls back on —
 	// a child process on this host, or a session on a member's Mac reaching in
@@ -370,6 +377,9 @@ func (h *Handler) authMiddleware(c *fiber.Ctx) error {
 
 	auth := c.Get("Authorization")
 	if auth == "" {
+		if h.webAuth != nil {
+			return h.authenticateWebSession(c)
+		}
 		return unauthorized(c)
 	}
 

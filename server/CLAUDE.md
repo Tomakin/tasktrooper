@@ -50,7 +50,7 @@ implementing it.
 
 | Invariant | Where |
 |---|---|
-| Auth is the `SERVER_API_KEY` bearer token | `adapter/http/handler.go` (`authMiddleware`) |
+| Auth is the `SERVER_API_KEY` bearer token; with `WEB_AUTH_USERS` set, a web session cookie too (`application/webauth`) | `adapter/http/handler.go` (`authMiddleware`), `adapter/http/handler_webauth.go` |
 | The listener binds `127.0.0.1` only | `platform/runtime/runtime.go` |
 | Exactly one stdout line: `LISTENING http://127.0.0.1:<port>`; logs go to stderr | `platform/runtime/runtime.go` (`ConfigureLogger`) |
 | Empty `DATABASE_URL` ⇒ embedded Postgres 17 | `platform/embeddedpg` |

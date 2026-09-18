@@ -22,6 +22,16 @@ The web UI (`src`) follows **Atomic Design**. Every piece of UI is one of: **ato
 
 Placement rule: **atoms only in `components/ui/`**; molecules/organisms in the closest feature directory (`chat/`, `board/`, `workspace/`, `agent/`, `projects/`, `admin/`, `runner/`, `setup/`) or `layout/` for structural pieces; pages in `pages/`.
 
+## Web sign-in
+
+| Piece | What it is |
+|---|---|
+| `auth/WebSessionGate` | Organism in `App.tsx`: pass-through with a bearer token; otherwise `/auth/me` → app, `LoginPage` or `ConfigErrorPage` |
+| `auth/LoginForm` | Molecule: username, password, submit, one `Notice` for the error |
+| `pages/LoginPage` | `Card` + `SidebarBrand` + `LoginForm`; maps 401/429 to messages |
+| `layout/SessionMenu` | Molecule in `Header`: user name + sign out; renders nothing without a web session |
+| `hooks/useWebSession` | The session context (`username`, `signOut`), null in the desktop shell |
+
 ## Guided first-run sequence — `/setup`
 
 | Piece | What it is |

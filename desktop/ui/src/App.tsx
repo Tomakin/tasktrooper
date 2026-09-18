@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { Toaster } from "sonner";
+import { WebSessionGate } from "@/components/auth/WebSessionGate";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { SetupProvider } from "@/hooks/useSetup";
 import { ThemeProvider } from "@/hooks/useTheme";
@@ -39,6 +40,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <I18nProvider>
+        <WebSessionGate>
         {/* The guided first-run sequence's state, above the router because the
             route gate in ProtectedRoute and the /setup page itself both read it
             and must not disagree. It derives everything and stores nothing. */}
@@ -121,6 +123,7 @@ export default function App() {
         </BrowserRouter>
         <Toaster richColors position="top-right" closeButton />
         </SetupProvider>
+        </WebSessionGate>
       </I18nProvider>
     </ThemeProvider>
   );

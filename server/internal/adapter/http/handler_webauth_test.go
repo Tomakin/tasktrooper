@@ -2,7 +2,9 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/valyala/fasthttp"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/webauth"
@@ -234,22 +237,85 @@ func TestWebMeAndLogout(t *testing.T) {
 	}
 }
 
-func TestWebLoginLockoutIsPerClientAddress(t *testing.T) {
+func TestWebLoginLockout(t *testing.T) {
 	app := newWebAuthTestApp(t, true)
 	bad := `{"username":"alice","password":"wrong"}`
 	var last *http.Response
 	for i := 0; i < webauth.DefaultMaxFailures; i++ {
-		last = doWeb(t, app, webReq{method: "POST", path: "/auth/login", csrf: true, body: bad, cfIP: "198.51.100.7"})
+		// A network peer cannot dodge the lock by varying CF-Connecting-IP.
+		last = doWeb(t, app, webReq{method: "POST", path: "/auth/login", csrf: true, body: bad, cfIP: fmt.Sprintf("198.51.100.%d", i)})
 	}
 	if last.StatusCode != fiber.StatusTooManyRequests || last.Header.Get("Retry-After") != "900" {
 		t.Fatalf("fifth failure: %d retry-after %q", last.StatusCode, last.Header.Get("Retry-After"))
 	}
 	good := `{"username":"alice","password":"s3cret-pass"}`
-	if s := doWeb(t, app, webReq{method: "POST", path: "/auth/login", csrf: true, body: good, cfIP: "198.51.100.7"}).StatusCode; s != 429 {
-		t.Errorf("locked address with the right password: %d", s)
+	if s := doWeb(t, app, webReq{method: "POST", path: "/auth/login", csrf: true, body: good, cfIP: "192.0.2.4"}).StatusCode; s != 429 {
+		t.Errorf("locked peer with the right password: %d", s)
 	}
-	if s := doWeb(t, app, webReq{method: "POST", path: "/auth/login", csrf: true, body: good, cfIP: "192.0.2.4"}).StatusCode; s != 200 {
-		t.Errorf("another address: %d", s)
+}
+
+func addrFor(t *testing.T, peer, cfHeader string) string {
+	t.Helper()
+	app := fiber.New()
+	fctx := &fasthttp.RequestCtx{}
+	var req fasthttp.Request
+	if cfHeader != "" {
+		req.Header.Set("CF-Connecting-IP", cfHeader)
+	}
+	fctx.Init(&req, &net.TCPAddr{IP: net.ParseIP(peer), Port: 5555}, nil)
+	c := app.AcquireCtx(fctx)
+	defer app.ReleaseCtx(c)
+	return clientAddr(c)
+}
+
+func TestClientAddrTrustsCloudflareOnlyFromLoopback(t *testing.T) {
+	if got := addrFor(t, "127.0.0.1", "203.0.113.9"); got != "203.0.113.9" {
+		t.Errorf("cloudflared on loopback: %s", got)
+	}
+	if got := addrFor(t, "192.168.1.20", "203.0.113.9"); got != "192.168.1.20" {
+		t.Errorf("a LAN peer's header must be ignored: %s", got)
+	}
+	if got := addrFor(t, "127.0.0.1", ""); got != "127.0.0.1" {
+		t.Errorf("no header: %s", got)
+	}
+}
+
+func TestInsecureCookieForPlainHTTP(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("s3cret-pass"), webauth.MinBcryptCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := webauth.NewService(webauth.Config{Users: []webauth.User{{Name: "alice", Hash: hash}}},
+		&memWebSessions{rows: map[string]domain.WebSession{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{legacyAPIKey: "k", webAuth: svc, webCookieInsecure: true}
+	app := fiber.New()
+	app.Use(h.authMiddleware)
+	app.Get("/v1/things", func(c *fiber.Ctx) error { return c.SendString("ok") })
+	h.registerWebAuthRoutes(app)
+
+	req := httptest.NewRequest("POST", "/auth/login", strings.NewReader(`{"username":"alice","password":"s3cret-pass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(webCSRFHeader, "1")
+	resp, err := app.Test(req, -1)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("login: %v %v", resp, err)
+	}
+	var cookie *http.Cookie
+	for _, c := range resp.Cookies() {
+		if c.Name == insecureWebSessionCookie {
+			cookie = c
+		}
+	}
+	if cookie == nil || cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("cookie %+v", cookie)
+	}
+	api := httptest.NewRequest("GET", "/v1/things", nil)
+	api.Header.Set("Cookie", insecureWebSessionCookie+"="+cookie.Value)
+	if resp, _ := app.Test(api, -1); resp.StatusCode != 200 {
+		t.Fatalf("api with the plain cookie: %d", resp.StatusCode)
 	}
 }
 

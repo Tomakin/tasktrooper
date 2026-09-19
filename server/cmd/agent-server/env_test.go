@@ -240,3 +240,38 @@ func TestWebAuthUsersFromEnv(t *testing.T) {
 		}
 	})
 }
+
+func TestListenHostFromEnv(t *testing.T) {
+	for _, tc := range []struct {
+		raw     string
+		webAuth bool
+		want    string
+		wantErr bool
+	}{
+		{"", false, "", false},
+		{"127.0.0.1", false, "", false},
+		{"127.0.0.2", false, "127.0.0.2", false},
+		{"192.168.1.150", true, "192.168.1.150", false},
+		{"0.0.0.0", true, "0.0.0.0", false},
+		{"192.168.1.150", false, "", true},
+		{"0.0.0.0", false, "", true},
+		{"homeserver", true, "", true},
+	} {
+		got, err := listenHostFromEnv(tc.raw, tc.webAuth)
+		if (err != nil) != tc.wantErr || got != tc.want {
+			t.Errorf("listenHostFromEnv(%q, %v) = %q, %v", tc.raw, tc.webAuth, got, err)
+		}
+	}
+
+	env := validEnv()
+	env["LISTEN_HOST"] = "192.168.1.150"
+	if _, err := optionsFromEnv(fakeEnv(env)); err == nil {
+		t.Fatal("a network listener without web sign-in must fail boot")
+	}
+	env["WEB_COOKIE_INSECURE"] = "1"
+	env["LISTEN_HOST"] = ""
+	cfg, err := optionsFromEnv(fakeEnv(env))
+	if err != nil || !cfg.Options.WebCookieInsecure || cfg.Options.ListenHost != "" {
+		t.Fatalf("cfg=%+v err=%v", cfg.Options, err)
+	}
+}

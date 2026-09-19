@@ -106,7 +106,7 @@ func (s *Service) reviewChainGate(ctx context.Context, repo domain.Repository, t
 	if target == domain.TaskColumnReleased && prev == domain.TaskColumnDone {
 		return nil
 	}
-	stages := domain.ReviewChainForType(task.TaskType)
+	stages := domain.ReviewChainForFlow(task.TaskType, s.branchFlowEnabled(ctx, repo.ID))
 	if len(stages) == 0 {
 		return nil
 	}

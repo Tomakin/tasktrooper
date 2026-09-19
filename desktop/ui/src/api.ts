@@ -883,6 +883,52 @@ export interface AttachmentMeta {
   created_at: string;
 }
 
+export interface BranchFlowSettings {
+  enabled: boolean;
+  integration_branch: string;
+}
+
+export type IntegrationStatus = "waiting" | "merged" | "conflict" | "failed";
+export type IntegrationReason =
+  | "no_token"
+  | "no_pull_request"
+  | "pull_request_closed"
+  | "no_coordinates"
+  | "open_failed"
+  | "merge_refused"
+  | "checks_pending"
+  | "computing"
+  | "conflict";
+export type IntegrationDeployStatus = "pending" | "success" | "failure" | "none";
+
+export interface TaskIntegration {
+  task_id: string;
+  branch: string;
+  pr_number?: number;
+  pr_url?: string;
+  head_sha?: string;
+  merge_sha?: string;
+  status: IntegrationStatus;
+  reason?: IntegrationReason | "";
+  detail?: string;
+  deploy_status?: IntegrationDeployStatus | "";
+  deploy_url?: string;
+  merged_at?: string;
+  updated_at: string;
+}
+
+export interface TaskIntegrationResponse {
+  enabled: boolean;
+  integration_branch?: string;
+  integration?: TaskIntegration;
+}
+
+export interface TaskReleaseResult {
+  task: BoardTask;
+  merge?: { merged: boolean; merge_commit_sha?: string; pr_url?: string };
+  merge_error?: string;
+}
+
 export interface BoardTask {
   id: string;
   repository_id: string;
@@ -3524,6 +3570,21 @@ export const api = {
 
   updateProjectTask: (repositoryId: string, taskId: string, data: UpdateBoardTaskInput) =>
     api.updateRepositoryTask(repositoryId, taskId, data),
+
+  getBranchFlow: (repositoryId: string) =>
+    request<BranchFlowSettings>(`/v1/repositories/${repositoryId}/branch-flow`),
+
+  setBranchFlow: (repositoryId: string, integrationBranch: string) =>
+    request<BranchFlowSettings>(`/v1/repositories/${repositoryId}/branch-flow`, {
+      method: "PUT",
+      body: JSON.stringify({ integration_branch: integrationBranch }),
+    }),
+
+  getTaskIntegration: (repositoryId: string, taskId: string) =>
+    request<TaskIntegrationResponse>(`/v1/repositories/${repositoryId}/tasks/${taskId}/integration`),
+
+  releaseTask: (repositoryId: string, taskId: string) =>
+    request<TaskReleaseResult>(`/v1/repositories/${repositoryId}/tasks/${taskId}/release`, { method: "POST" }),
 
   deleteRepositoryTask: (repositoryId: string, taskId: string) =>
     request<void>(`/v1/repositories/${repositoryId}/tasks/${taskId}`, { method: "DELETE" }),

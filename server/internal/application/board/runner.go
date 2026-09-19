@@ -39,6 +39,10 @@ type RunJob struct {
 	// (correctly) been moved to in_progress: the instruction, the reviewer's
 	// comments and the failed pipeline are all chosen from it.
 	EnteredFrom domain.TaskColumn
+	// BranchFlow is set when the repository runs the two-stage delivery
+	// (application/branchflow): QA then hands a passing task straight to
+	// human_uat, where it is put on the integration branch for a human to test.
+	BranchFlow bool
 }
 
 // isRevision reports whether this run is fixing review feedback, whether the
@@ -184,7 +188,17 @@ type PullRequestReader interface {
 // in front of the revision run that has to act on them.
 func (r *Runner) SetPullRequestReader(reader PullRequestReader) { r.prReader = reader }
 
+// BranchFlowChecker reports whether a repository runs the two-stage delivery.
+type BranchFlowChecker interface {
+	Enabled(ctx context.Context, repositoryID uuid.UUID) bool
+}
+
+// SetBranchFlow wires the two-stage delivery lookup. Optional: nil is the
+// ordinary one-stage flow everywhere.
+func (r *Runner) SetBranchFlow(c BranchFlowChecker) { r.branchFlow = c }
+
 type Runner struct {
+	branchFlow BranchFlowChecker
 	// agentLoop is the ROUTER in production (agent.Router), not the bare loop:
 	// every run this package starts — the main one, the verify-fix rounds, the
 	// criteria and review sweeps — must be able to land on a host executor when
@@ -796,6 +810,9 @@ func (r *Runner) runJob(ctx context.Context, job RunJob) {
 	// the queue when that task frees up.
 	if !r.beginTask(job) {
 		return
+	}
+	if r.branchFlow != nil {
+		job.BranchFlow = r.branchFlow.Enabled(ctx, job.RepositoryID)
 	}
 	err := r.execute(ctx, job)
 	r.endTask(job.Task.ID)
@@ -3274,7 +3291,7 @@ func runInstruction(job RunJob) string {
 	if job.EnteredFrom == domain.TaskColumnNeedRevision {
 		task.Column = domain.TaskColumnNeedRevision
 	}
-	return columnInstruction(task)
+	return columnInstructionForFlow(task, job.BranchFlow)
 }
 
 // verifyBeforeFinishing is the step the implementer instruction never named.
@@ -3400,6 +3417,20 @@ const qaExecutionInstruction = "Test it as a black box, on a RUNNING product. " 
 // column it was already in — which the step then filled with unrelated work
 // because there was nothing else for it to do.
 func columnInstruction(task domain.BoardTask) string {
+	return columnInstructionForFlow(task, false)
+}
+
+// qaPassColumn is where a QA round that passed every criterion sends the task.
+// With the two-stage delivery there is no PM UAT: the human testing on the
+// integration environment is the acceptance.
+func qaPassColumn(branchFlow bool) string {
+	if branchFlow {
+		return string(domain.TaskColumnHumanUAT)
+	}
+	return string(domain.TaskColumnPMUAT)
+}
+
+func columnInstructionForFlow(task domain.BoardTask, branchFlow bool) string {
 	// Type before column: the same column means different work for different
 	// task types. `in_progress` on a task/bug is "write the code"; on an analiz
 	// it is "read the code and write the spec". Reading the column alone is what
@@ -3455,7 +3486,7 @@ func columnInstruction(task domain.BoardTask) string {
 			" Record your own verdict on each acceptance criterion with " +
 			"review_criterion as you verify it — approve only what you executed, reject with a note saying what failed. " +
 			"Finish from in_qa: every acceptance criterion passes → " +
-			"move it to pm_uat, with the evidence in the review_criterion notes and NO comment on the card — a pass writes nothing; any criterion fails → move it to need_revision " +
+			"move it to " + qaPassColumn(branchFlow) + ", with the evidence in the review_criterion notes and NO comment on the card — a pass writes nothing; any criterion fails → move it to need_revision " +
 			"and comment the numbered expected-vs-actual per failure."
 	case domain.TaskColumnInQA:
 		// The normal QA instruction: a task dispatched from ready_for_qa is
@@ -3465,7 +3496,7 @@ func columnInstruction(task domain.BoardTask) string {
 			qaExecutionInstruction +
 			" Continue and finish the scenarios in this run, recording your verdict per acceptance criterion with " +
 			"review_criterion (approve what you executed and observed; reject with an expected-vs-actual note), then " +
-			"leave the column: all criteria pass → pm_uat, evidence in the criterion notes and no comment on the card (a pass is not news); " +
+			"leave the column: all criteria pass → " + qaPassColumn(branchFlow) + ", evidence in the criterion notes and no comment on the card (a pass is not news); " +
 			"any failure → need_revision with a comment giving expected-vs-actual per failure. Never leave a task parked in in_qa."
 	case domain.TaskColumnPMUAT:
 		return "This task is in `pm_uat`: acceptance control. Compare the original request and every acceptance criterion " +

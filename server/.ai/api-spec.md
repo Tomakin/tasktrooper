@@ -226,6 +226,25 @@ watch keys off rather than the default branch.
   off. The clone is `port.GitClient.CloneRepo`, the same call the GitHub import makes, so
   private repositories work through the same token injection.
 
+## Two-stage delivery (migration 144)
+
+A repository with an integration branch (e.g. `development`) delivers in two
+stages. A task that passes QA goes to `human_uat` (no `pm_uat` in this flow;
+with `require_review_chain` the UAT stage is `human_uat`). A sweeper
+(`application/branchflow`, every 30 s) opens a second pull request from the
+task branch into the integration branch, merges it with a **merge commit**
+(branch kept), and watches the push's workflow runs — it never dispatches one.
+A conflict (`dirty`) comments and moves the task to `need_revision`. New
+commits on the branch are merged again.
+
+| Route | |
+|---|---|
+| `GET/PUT /v1/repositories/{id}/branch-flow` | `{enabled, integration_branch}`; PUT with `""` turns it off |
+| `GET /v1/repositories/{id}/tasks/{taskId}/integration` | `{enabled, integration_branch, integration?}` — status `waiting·merged·conflict·failed`, deploy_status `pending·success·failure·none` |
+| `POST /v1/repositories/{id}/tasks/{taskId}/release` | The human's "passed": 409 `release_not_ready` unless the current head is merged and its deploy did not fail; otherwise moves the task to `done` (every gate applies) and runs the gated squash merge into the default branch. A refused merge returns 200 with `merge_error` and leaves the task in `done`. |
+
+The release branch is the repository's GitHub default branch.
+
 ## Deploy targets
 
 - `GET /v1/deploy/templates?kind=backend` — recipe catalog (bodies stripped);

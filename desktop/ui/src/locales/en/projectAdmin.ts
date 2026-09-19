@@ -154,6 +154,16 @@ export const projectAdmin = {
     skipOption: "- (skip)",
     savePipeline: "Save Pipeline",
     dangerZone: "Danger Zone",
+    branchFlow: {
+      title: "Two-stage delivery",
+      description: "When set, a task that passes QA is merged into this branch first (its own deploy puts it on your test environment). You test it there and approve it; only then is its pull request merged into the default branch. Leave empty for the ordinary single-stage flow.",
+      branchLabel: "Integration branch",
+      branchPlaceholder: "development",
+      enabled: "On: {branch} → default branch",
+      disabled: "Off",
+      saved: "Delivery flow saved",
+      disableAction: "Turn off",
+    },
     deleteRepoWarning:
       "Deleting the repository permanently removes tasks, comments, pipeline history, and index data. This action cannot be undone.",
     deleteRepo: "Delete Repository",

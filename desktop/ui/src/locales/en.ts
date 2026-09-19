@@ -60,6 +60,14 @@ export const en = {
     },
     loadFailed: "Failed to load settings",
     savedToast: "Settings saved",
+    agentConcurrency: {
+      title: "Concurrent agents",
+      description: "How many agent sessions may run at the same time on this machine, across every agent runtime. Raising it starts queued work right away; lowering it never stops a running session — new ones wait until the count drops below the limit.",
+      label: "Agents at once",
+      occupancy: "{active} / {limit} running, {waiting} queued",
+      occupancyUnlimited: "{active} running, no limit",
+      savedToast: "Concurrent agent limit saved",
+    },
     github: {
       statusUnavailable: "Status unavailable.",
       connected: "✓ Connected: {login} — agents can create private repos, push, and open draft PRs.",

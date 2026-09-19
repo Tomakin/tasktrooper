@@ -75,6 +75,12 @@ Placement rule: **atoms only in `components/ui/`**; molecules/organisms in the c
   too). `BoardPage`'s card shows the agent badge; `created_by` shows when no agent is set.
 - Clearing the assignee sends `null`.
 
+## Concurrent agents
+
+| Piece | What it is |
+|---|---|
+| `admin/AgentConcurrencyCard` | Organism on `SettingsPage`: 1–10 picker and the live "active / limit, queued" badge (`/v1/settings/agent-concurrency`, refreshed every 10 s); renders nothing on a server without the route |
+
 ## Store console + mobile release panel
 
 | Piece | What it is |

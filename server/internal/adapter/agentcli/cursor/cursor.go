@@ -50,11 +50,15 @@ type Config struct {
 	RunTimeout  time.Duration
 	MCP         MCPConfig
 	MCPProvider MCPProvider
+	// Limiter is the machine-wide session bound shared with the other CLI
+	// runtimes. Nil runs unbounded, as this executor always did.
+	Limiter port.SessionLimiter
 }
 
 // Executor runs board tasks through the Cursor CLI. It satisfies
 // port.TaskExecutor.
 type Executor struct {
+	limiter     port.SessionLimiter
 	bin         string
 	runTimeout  time.Duration
 	mcp         MCPConfig
@@ -84,6 +88,7 @@ func New(cfg Config) (*Executor, error) {
 		runTimeout = DefaultRunTimeout
 	}
 	return &Executor{
+		limiter:     cfg.Limiter,
 		bin:         resolved,
 		runTimeout:  runTimeout,
 		mcp:         cfg.MCP,
@@ -162,6 +167,13 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 	}
 	if block := e.gatedQuotaBlock(req); block != nil {
 		return domain.AgentResponse{}, block
+	}
+	if e.limiter != nil {
+		release, err := e.limiter.Acquire(ctx)
+		if err != nil {
+			return domain.AgentResponse{}, err
+		}
+		defer release()
 	}
 
 	mcpCfg, releaseMCP, err := e.resolveMCP(ctx, MCPRun{Policy: req.Policy, Label: req.TaskKey})

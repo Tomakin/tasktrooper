@@ -59,11 +59,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/sessionlimit"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/activity"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
@@ -178,6 +178,10 @@ type Config struct {
 	// DefaultMaxConcurrentSessions; negative means unlimited — see
 	// domain.ClaudeCodeConfig.MaxConcurrentSessions for why the cap exists.
 	MaxConcurrentSessions int
+	// Limiter is the machine-wide session bound shared with the other CLI
+	// runtimes, adjustable while sessions run. Set, it replaces
+	// MaxConcurrentSessions.
+	Limiter port.SessionLimiter
 }
 
 // Executor runs board tasks through the Claude Code CLI. It satisfies
@@ -195,14 +199,7 @@ type Executor struct {
 	// a clock.
 	now func() time.Time
 
-	// sem bounds concurrent sessions; nil means unlimited (MaxConcurrentSessions
-	// configured negative). slotCap mirrors its capacity, or -1 when unlimited,
-	// so SlotsInUse has an answer either way without reading cap(nil).
-	sem     chan struct{}
-	slotCap int
-	// active is how many sessions currently hold a slot, tracked separately from
-	// len(sem) so it still means something when sem is nil.
-	active int64
+	limiter port.SessionLimiter
 
 	// gateMu guards the account-wide usage-limit gate: one session's 429 tells
 	// every OTHER session about to start not to bother, rather than each of up
@@ -277,15 +274,13 @@ func New(cfg Config) (*Executor, error) {
 	if runTimeout <= 0 {
 		runTimeout = DefaultRunTimeout
 	}
-	slotCap := cfg.MaxConcurrentSessions
-	if slotCap == 0 {
-		slotCap = DefaultMaxConcurrentSessions
-	} else if slotCap < 0 {
-		slotCap = -1
-	}
-	var sem chan struct{}
-	if slotCap > 0 {
-		sem = make(chan struct{}, slotCap)
+	limiter := cfg.Limiter
+	if limiter == nil {
+		slotCap := cfg.MaxConcurrentSessions
+		if slotCap == 0 {
+			slotCap = DefaultMaxConcurrentSessions
+		}
+		limiter = sessionlimit.New(slotCap)
 	}
 	return &Executor{
 		bin:            resolved,
@@ -295,8 +290,7 @@ func New(cfg Config) (*Executor, error) {
 		mcp:            cfg.MCP,
 		mcpProvider:    cfg.MCPProvider,
 		now:            time.Now,
-		sem:            sem,
-		slotCap:        slotCap,
+		limiter:        limiter,
 	}, nil
 }
 
@@ -384,51 +378,40 @@ func (e *Executor) gatedQuotaBlock(req domain.TaskExecution) *domain.QuotaBlock 
 }
 
 // SlotsInUse reports the concurrency cap's occupancy, for observability. cap
-// is -1 when MaxConcurrentSessions was configured negative (unlimited).
+// is -1 when the bound is unlimited.
 func (e *Executor) SlotsInUse() (used, cap int) {
-	return int(atomic.LoadInt64(&e.active)), e.slotCap
+	s := e.limiter.Stats()
+	if s.Limit <= 0 {
+		return s.Active, -1
+	}
+	return s.Active, s.Limit
 }
 
-// acquireSlot blocks until a concurrency slot is free or ctx is cancelled.
-// Skipped entirely when the cap is unlimited (sem is nil). It must run BEFORE
-// resolveMCP: minting a per-run MCP token and then waiting on the semaphore
-// would leave that credential alive and unused for however long the queue
-// takes.
-func (e *Executor) acquireSlot(ctx context.Context, taskKey string) error {
-	if e.sem != nil {
-		start := e.now()
-		select {
-		case e.sem <- struct{}{}:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		if waited := e.now().Sub(start); waited > time.Second {
-			log.Info().
-				Str("task_key", taskKey).
-				Dur("waited", waited).
-				Int("cap", e.slotCap).
-				Msg("claude code session waited for a concurrency slot")
-			if rec := activity.FromContext(ctx); rec != nil {
-				rec.Step("claude_code_slot_wait", map[string]any{
-					"waited_ms":      waited.Milliseconds(),
-					"max_concurrent": e.slotCap,
-				})
-			}
+// acquireSlot blocks until a concurrency slot is free or ctx is cancelled, and
+// returns the release the caller defers. It must run BEFORE resolveMCP:
+// minting a per-run MCP token and then waiting on the limiter would leave that
+// credential alive and unused for however long the queue takes.
+func (e *Executor) acquireSlot(ctx context.Context, taskKey string) (func(), error) {
+	start := e.now()
+	release, err := e.limiter.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if waited := e.now().Sub(start); waited > time.Second {
+		limit := e.limiter.Stats().Limit
+		log.Info().
+			Str("task_key", taskKey).
+			Dur("waited", waited).
+			Int("cap", limit).
+			Msg("claude code session waited for a concurrency slot")
+		if rec := activity.FromContext(ctx); rec != nil {
+			rec.Step("claude_code_slot_wait", map[string]any{
+				"waited_ms":      waited.Milliseconds(),
+				"max_concurrent": limit,
+			})
 		}
 	}
-	atomic.AddInt64(&e.active, 1)
-	return nil
-}
-
-// releaseSlot is acquireSlot's counterpart. Callers defer it only after
-// acquireSlot has returned successfully — releasing a slot that was never
-// acquired would let one extra session through the semaphore and, on an
-// unlimited executor, would drive active negative.
-func (e *Executor) releaseSlot() {
-	atomic.AddInt64(&e.active, -1)
-	if e.sem != nil {
-		<-e.sem
-	}
+	return release, nil
 }
 
 // Execute runs the task in a CLI session and maps the session's outcome onto
@@ -454,10 +437,11 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 		return domain.AgentResponse{}, block
 	}
 
-	if err := e.acquireSlot(ctx, req.TaskKey); err != nil {
+	release, err := e.acquireSlot(ctx, req.TaskKey)
+	if err != nil {
 		return domain.AgentResponse{}, err
 	}
-	defer e.releaseSlot()
+	defer release()
 	// Checked again once the slot is held: a session that queued behind the
 	// cap for minutes may have watched every running session park meanwhile,
 	// and spawning it now would only rediscover the same spent window.

@@ -61,6 +61,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/billing"
 	boardapp "github.com/makifbaysal/tasktrooper/server/internal/application/board"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/bootseed"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/branchflow"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/catalog"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/chunker"
 	appconfig "github.com/makifbaysal/tasktrooper/server/internal/application/config"
@@ -769,6 +770,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	e.mu.RLock()
 	cfg := e.cfg
 	e.mu.RUnlock()
+
+	var branchFlowSvc *branchflow.Service
 
 	if e.mcpManager == nil {
 		e.mcpManager = &mcpadapter.Manager{}
@@ -1674,6 +1677,40 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				WorkspaceRoot: cfg.Storage.Sessions.WorkspaceRoot,
 			})
 			boardKit.PullRequests = taskPRSvc
+
+			// The two-stage delivery (development → main). Needs the same GitHub
+			// token and the gated merge above, so it lives in the same branch.
+			if e.pgDB != nil && boardTaskStore != nil {
+				prAPI := githubapi.NewPRAPI()
+				branchFlowSvc = branchflow.New(branchflow.Deps{
+					Flows:  pgstore.NewBranchFlowStore(e.pgDB),
+					Tasks:  boardTaskStore,
+					Board:  repositorySvc,
+					Merger: taskPRSvc,
+					PRs:    prAPI,
+					GitHub: prAPI,
+					Tokens: githubTokens.GitHubToken,
+					Coordinates: func(ctx context.Context, repositoryID uuid.UUID) (string, string, error) {
+						if gitClient == nil {
+							return "", "", fmt.Errorf("git is not configured on this deployment")
+						}
+						root, err := repositorySvc.ResolveRootPath(ctx, repositoryID)
+						if err != nil {
+							return "", "", err
+						}
+						owner, name, ok := githubapi.ParseOwnerRepo(gitClient.OriginURL(ctx, root))
+						if !ok {
+							return "", "", fmt.Errorf("the repository's origin is not a GitHub URL")
+						}
+						return owner, name, nil
+					},
+				})
+				repositorySvc.SetBranchFlow(branchFlowSvc)
+				if boardRunner != nil {
+					boardRunner.SetBranchFlow(branchFlowSvc)
+				}
+				branchFlowSvc.Start(ctx, branchflow.DefaultSweepInterval)
+			}
 			// The same reader the tools use, so a revision run is handed the
 			// reviewer's PR comments without having to call a tool for them.
 			if boardRunner != nil {
@@ -2622,6 +2659,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		TaskRuns:          taskAgentRunStore,
 		RunControl:        boardRunControl,
 		TaskChat:          boardTaskChat,
+		BranchFlow:        branchFlowHandlerControl(branchFlowSvc),
 		EvolutionSvc:      e.evolutionSvc,
 		MemorySvc:         memorySvc,
 		KPISvc:            kpiSvc,

@@ -112,6 +112,7 @@ type Handler struct {
 	taskRuns          port.TaskAgentRunStore
 	runControl        BoardRunControl
 	taskChat          TaskChatControl
+	branchFlow        BranchFlowControl
 	evolutionSvc      *evolution.Service
 	memorySvc         *memory.Service
 	kpiSvc            *kpi.Service
@@ -169,6 +170,9 @@ type Config struct {
 	TaskRuns          port.TaskAgentRunStore
 	RunControl        BoardRunControl
 	TaskChat          TaskChatControl
+	// BranchFlow is the two-stage delivery (development → main). Nil mounts
+	// none of its routes.
+	BranchFlow        BranchFlowControl
 	EvolutionSvc      *evolution.Service
 	MemorySvc         *memory.Service
 	KPISvc            *kpi.Service
@@ -229,6 +233,7 @@ func NewHandler(cfg Config) *Handler {
 		taskRuns:          cfg.TaskRuns,
 		runControl:        cfg.RunControl,
 		taskChat:          cfg.TaskChat,
+		branchFlow:        cfg.BranchFlow,
 		evolutionSvc:      cfg.EvolutionSvc,
 		memorySvc:         cfg.MemorySvc,
 		kpiSvc:            cfg.KPISvc,
@@ -285,6 +290,7 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	h.registerIndexRoutes(app)
 	h.registerEmbeddingMapRoutes(app)
 	h.registerRepositoryRoutes(app)
+	h.registerBranchFlowRoutes(app)
 	h.registerInitiativeRoutes(app)
 	h.registerDeployRoutes(app)
 	h.registerRepoDocsRoutes(app)

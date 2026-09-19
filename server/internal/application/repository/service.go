@@ -65,6 +65,7 @@ type ProfileRefresher interface {
 }
 
 type Service struct {
+	branchFlow       board.BranchFlowChecker
 	repos            port.RepositoryStore
 	tasks            port.BoardTaskStore
 	criteria         port.AcceptanceCriterionStore
@@ -183,6 +184,17 @@ func (s *Service) SetCompletionStamper(cs *board.CompletionStamper) {
 // unintercepted, which is the pre-gate behaviour.
 func (s *Service) SetReviewGate(g *board.ReviewGate) {
 	s.reviewGate = g
+}
+
+// SetBranchFlow wires the two-stage delivery lookup; with it on for a
+// repository, the review chain's acceptance stage is human_uat instead of
+// pm_uat. Nil is the ordinary flow.
+func (s *Service) SetBranchFlow(c board.BranchFlowChecker) {
+	s.branchFlow = c
+}
+
+func (s *Service) branchFlowEnabled(ctx context.Context, repositoryID uuid.UUID) bool {
+	return s.branchFlow != nil && s.branchFlow.Enabled(ctx, repositoryID)
 }
 
 func (s *Service) SetEvolution(n RevisionNotifier) {

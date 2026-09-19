@@ -14,6 +14,7 @@ import {
   type RepoSubProject,
 } from "@/api";
 import { MultiSelectPicker } from "@/components/admin/MultiSelectPicker";
+import { BranchFlowCard } from "@/components/projects/BranchFlowCard";
 import { DependenciesPanel } from "@/components/projects/DependenciesPanel";
 import { MobileStorePanel } from "@/components/projects/MobileStorePanel";
 import { VercelProjectPanel } from "@/components/projects/VercelProjectPanel";
@@ -757,6 +758,8 @@ export function ProjectSettingsPage() {
               )}
             </div>
           )}
+
+          {repoId && <BranchFlowCard repositoryId={repoId} />}
 
           {repoId && <DependenciesPanel repositoryId={repoId} />}
 

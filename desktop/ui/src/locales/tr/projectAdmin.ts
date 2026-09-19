@@ -149,6 +149,16 @@ export const projectAdmin: ProjectAdminDict = {
     skipOption: "- (atla)",
     savePipeline: "Pipeline'ı Kaydet",
     dangerZone: "Tehlikeli Alan",
+    branchFlow: {
+      title: "İki aşamalı teslim",
+      description: "Tanımlandığında QA'dan geçen görev önce bu dala birleştirilir; dalın kendi deploy süreci değişikliği test ortamınıza taşır. Değişikliği orada test edip onayladığınızda görevin pull request'i varsayılan dala birleştirilir. Tek aşamalı akış için boş bırakın.",
+      branchLabel: "Entegrasyon dalı",
+      branchPlaceholder: "development",
+      enabled: "Açık: {branch} → varsayılan dal",
+      disabled: "Kapalı",
+      saved: "Teslim akışı kaydedildi",
+      disableAction: "Kapat",
+    },
     deleteRepoWarning:
       "Depoyu silmek görevleri, yorumları, pipeline geçmişini ve indeks verilerini kalıcı olarak siler. Bu işlem geri alınamaz.",
     deleteRepo: "Depoyu Sil",

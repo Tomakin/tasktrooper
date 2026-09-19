@@ -99,6 +99,27 @@ func ReviewChainForType(t TaskType) []ReviewStage {
 	}
 }
 
+// ReviewChainForFlow is ReviewChainForType for a repository that runs the
+// two-stage delivery (development → main). There is no PM UAT in that flow:
+// the task is put on the integration branch and a human tests it there, so the
+// acceptance stage is human_uat.
+func ReviewChainForFlow(t TaskType, branchFlow bool) []ReviewStage {
+	stages := ReviewChainForType(t)
+	if !branchFlow {
+		return stages
+	}
+	for i, stage := range stages {
+		if stage.Column == TaskColumnPMUAT {
+			stages[i] = ReviewStage{
+				Column: TaskColumnHumanUAT,
+				Label:  "human UAT",
+				Remedy: "move it to human_uat so it is merged into the integration branch and a human tests it there",
+			}
+		}
+	}
+	return stages
+}
+
 // TaskTypeShipsCode reports whether a task of this type is expected to reach
 // production through a deploy. An analiz task ships nothing: its own workflow
 // moves it done → released once the implementation tasks it produced have been

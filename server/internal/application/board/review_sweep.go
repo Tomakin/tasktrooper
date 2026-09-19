@@ -15,12 +15,12 @@ import (
 // reviewExitColumn is the column an approving verdict sends the task to, per
 // column whose work is a verdict. analiz_review is absent on purpose: it is a
 // human approval gate, so there is no agent verdict to sweep there.
-func reviewExitColumn(column domain.TaskColumn) (domain.TaskColumn, bool) {
+func reviewExitColumn(column domain.TaskColumn, branchFlow bool) (domain.TaskColumn, bool) {
 	switch column {
 	case domain.TaskColumnCodeReview:
 		return domain.TaskColumnReadyForQA, true
 	case domain.TaskColumnInQA, domain.TaskColumnReadyForQA:
-		return domain.TaskColumnPMUAT, true
+		return domain.TaskColumn(qaPassColumn(branchFlow)), true
 	case domain.TaskColumnPMUAT:
 		return domain.TaskColumnHumanUAT, true
 	default:
@@ -249,7 +249,7 @@ func (r *Runner) sweepReviewVerdict(
 	if job.Task.TaskType == domain.TaskTypeAnaliz {
 		return nil
 	}
-	exit, ok := reviewExitColumn(job.Task.Column)
+	exit, ok := reviewExitColumn(job.Task.Column, job.BranchFlow)
 	if !ok {
 		return nil
 	}

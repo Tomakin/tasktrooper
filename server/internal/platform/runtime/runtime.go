@@ -26,6 +26,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/claudecode"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/cursor"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/opencode"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/sessionlimit"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/appstore"
 	desktopadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/desktop"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/deviceagent"
@@ -56,6 +57,7 @@ import (
 	vercelapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vercel"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agentcli"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/agentconcurrency"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/apikey"
 	attachmentapp "github.com/makifbaysal/tasktrooper/server/internal/application/attachment"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/billing"
@@ -803,6 +805,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var usageStore port.LLMUsageStore
 	var mcpStore port.MCPStore
 	var settingsStore port.SettingsStore
+	var sessionLimitStore port.SessionLimitStore
+	var agentConcurrencySvc *agentconcurrency.Service
 	var githubTokens port.GitHubTokenStore
 	var vercelCreds port.VercelCredentialStore
 	var llmProviderStore port.LLMProviderStore
@@ -879,6 +883,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// first used the environment no longer carries MCP_SECRETS_KEY.
 			pgSettings.SetCipher(e.secretsCipher, e.secretsCipherErr)
 			settingsStore = pgSettings
+			sessionLimitStore = pgSettings
 			githubTokens = pgSettings
 			vercelCreds = pgSettings
 			llmProviderStore = pgstore.NewLLMProviderStore(pgDB)
@@ -1336,6 +1341,14 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			e.mcpEndpoint = &mcpEndpoint{}
 		}
 		claudeMCP := &claudeCodeMCP{endpoint: e.mcpEndpoint, tokens: mcpserver.NewRunTokenRegistry(), registry: toolReg}
+		// One bound for every CLI runtime: the machine runs out of CPU and RAM
+		// the same way whichever CLI the agent happens to use.
+		configuredSessions := initialSessionLimit(cfg.ClaudeCode.MaxConcurrentSessions)
+		sessionLimiter := sessionlimit.New(configuredSessions)
+		if sessionLimitStore != nil {
+			agentConcurrencySvc = agentconcurrency.New(sessionLimiter, sessionLimitStore)
+			log.Info().Int("limit", agentConcurrencySvc.Load(ctx, configuredSessions)).Msg("agent session limit")
+		}
 		if executor, ccErr := claudecode.New(claudecode.Config{
 			Binary:     cfg.ClaudeCode.Binary,
 			MaxTurns:   cfg.ClaudeCode.MaxTurns,
@@ -1345,8 +1358,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			SettingSources: cfg.ClaudeCode.SettingSources,
 			// Per-run endpoint and credential, minted at the start of each
 			// session and revoked at its end. See claudecode_mcp.go.
-			MCPProvider:           claudeMCP,
-			MaxConcurrentSessions: cfg.ClaudeCode.MaxConcurrentSessions,
+			MCPProvider: claudeMCP,
+			Limiter:     sessionLimiter,
 		}); ccErr != nil {
 			log.Info().Err(ccErr).Msg("claude code executor not registered; agents on the claude_code provider cannot run on this host")
 		} else {
@@ -1368,6 +1381,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if executor, agErr := antigravity.New(antigravity.Config{
 			Binary:     cfg.Antigravity.Binary,
 			RunTimeout: cfg.Antigravity.RunTimeout,
+			Limiter:    sessionLimiter,
 		}); agErr != nil {
 			log.Info().Err(agErr).Msg("antigravity executor not registered; agents on the antigravity provider cannot run on this host")
 		} else {
@@ -1378,6 +1392,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if executor, curErr := cursor.New(cursor.Config{
 			Binary:     cfg.CursorAgent.Binary,
 			RunTimeout: cfg.CursorAgent.RunTimeout,
+			Limiter:    sessionLimiter,
 		}); curErr != nil {
 			log.Info().Err(curErr).Msg("cursor executor not registered; agents on the cursor_agent provider cannot run on this host")
 		} else {
@@ -1388,6 +1403,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if executor, ocErr := opencode.New(opencode.Config{
 			Binary:     cfg.Opencode.Binary,
 			RunTimeout: cfg.Opencode.RunTimeout,
+			Limiter:    sessionLimiter,
 		}); ocErr != nil {
 			log.Info().Err(ocErr).Msg("opencode executor not registered; agents on the opencode provider cannot run on this host")
 		} else {
@@ -2606,6 +2622,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		EvolutionSvc:      e.evolutionSvc,
 		MemorySvc:         memorySvc,
 		KPISvc:            kpiSvc,
+		AgentConcurrency:  agentConcurrencyControl(agentConcurrencySvc),
 		PerfStore:         perfStore,
 		GoldenStore:       goldenStore,
 		UsageStore:        usageStore,

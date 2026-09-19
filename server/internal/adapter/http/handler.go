@@ -114,6 +114,7 @@ type Handler struct {
 	evolutionSvc      *evolution.Service
 	memorySvc         *memory.Service
 	kpiSvc            *kpi.Service
+	agentConcurrency  AgentConcurrencyControl
 	perfStore         port.AgentPerformanceStore
 	goldenStore       port.GoldenTaskStore
 	usageStore        port.LLMUsageStore
@@ -170,6 +171,9 @@ type Config struct {
 	EvolutionSvc      *evolution.Service
 	MemorySvc         *memory.Service
 	KPISvc            *kpi.Service
+	// AgentConcurrency is the concurrent agent sessions setting. Nil mounts
+	// none of its routes.
+	AgentConcurrency  AgentConcurrencyControl
 	PerfStore         port.AgentPerformanceStore
 	GoldenStore       port.GoldenTaskStore
 	UsageStore        port.LLMUsageStore
@@ -227,6 +231,7 @@ func NewHandler(cfg Config) *Handler {
 		evolutionSvc:      cfg.EvolutionSvc,
 		memorySvc:         cfg.MemorySvc,
 		kpiSvc:            cfg.KPISvc,
+		agentConcurrency:  cfg.AgentConcurrency,
 		perfStore:         cfg.PerfStore,
 		goldenStore:       cfg.GoldenStore,
 		usageStore:        cfg.UsageStore,
@@ -290,6 +295,7 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	h.registerEvolutionRoutes(app)
 
 	h.registerSettingsRoutes(app)
+	h.registerAgentConcurrencyRoutes(app)
 	h.registerHostingRoutes(app)
 	h.registerRepoDependencyRoutes(app)
 	h.registerVercelOpsRoutes(app)

@@ -2335,6 +2335,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return JSON.parse(body) as T;
 }
 
+export interface AgentConcurrency {
+  /** 0 or less: unlimited (only reachable through config.yml). */
+  limit: number;
+  active: number;
+  waiting: number;
+  min: number;
+  max: number;
+}
+
 export interface UsageTotals {
   calls: number;
   prompt_tokens: number;
@@ -2417,6 +2426,9 @@ export const api = {
     ),
 
   getSettings: () => request<AppSettings>("/v1/settings"),
+  getAgentConcurrency: () => request<AgentConcurrency>("/v1/settings/agent-concurrency"),
+  setAgentConcurrency: (limit: number) =>
+    request<AgentConcurrency>("/v1/settings/agent-concurrency", { method: "PUT", body: JSON.stringify({ limit }) }),
   mobileDevices: () => request<MobileDeviceListResponse>("/v1/settings/mobile-devices"),
   createMobileDevice: (body: CreateMobileDeviceRequest) =>
     request<MobileDeviceListResponse>("/v1/settings/mobile-devices", {

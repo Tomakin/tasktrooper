@@ -41,6 +41,14 @@ export const tr: Dict = {
     },
     loadFailed: "Ayarlar yüklenemedi",
     savedToast: "Ayarlar kaydedildi",
+    agentConcurrency: {
+      title: "Eşzamanlı ajan sayısı",
+      description: "Bu makinede, tüm ajan çalışma ortamları genelinde aynı anda kaç ajan oturumunun çalışabileceğini belirler. Sınırı artırdığınızda kuyruktaki işler hemen başlar; azalttığınızda çalışan oturumlar durdurulmaz, yeni oturumlar sayı sınırın altına inene kadar bekler.",
+      label: "Aynı anda çalışacak ajan",
+      occupancy: "{active} / {limit} çalışıyor, {waiting} kuyrukta",
+      occupancyUnlimited: "{active} çalışıyor, sınır yok",
+      savedToast: "Eşzamanlı ajan sınırı kaydedildi",
+    },
     github: {
       statusUnavailable: "Durum alınamadı.",
       connected: "✓ Bağlı: {login} — ajanlar private repo oluşturabilir, push edebilir ve taslak PR açabilir.",

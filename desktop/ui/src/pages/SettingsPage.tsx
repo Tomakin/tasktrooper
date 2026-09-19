@@ -2,6 +2,7 @@ import { Bell, Globe, Package, Save } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api, setStoredLocale, type AppSettings } from "@/api";
+import { AgentConcurrencyCard } from "@/components/admin/AgentConcurrencyCard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -281,6 +282,7 @@ export function SettingsPage() {
           </Button>
         </Card>
       )}
+      <AgentConcurrencyCard />
       <BoilerplateCatalogCard />
       <NotificationsCard />
     </>

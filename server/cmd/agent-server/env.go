@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -96,6 +97,11 @@ func optionsFromEnv(getenv func(string) string) (localConfig, error) {
 		return localConfig{}, err
 	}
 
+	listenHost, err := listenHostFromEnv(getenv("LISTEN_HOST"), len(webUsers) > 0)
+	if err != nil {
+		return localConfig{}, err
+	}
+
 	dsn := strings.TrimSpace(getenv("DATABASE_URL"))
 	return localConfig{
 		Options: runtime.Options{
@@ -113,6 +119,8 @@ func optionsFromEnv(getenv func(string) string) (localConfig, error) {
 			AllowedRoots:      allowedRootsFromEnv(getenv("ALLOWED_ROOTS")),
 			UIRoot:            strings.TrimSpace(getenv("WEB_UI_DIR")),
 			WebAuthUsers:      webUsers,
+			ListenHost:        listenHost,
+			WebCookieInsecure: strings.TrimSpace(getenv("WEB_COOKIE_INSECURE")) == "1",
 		},
 		PostgresDSN:    dsn,
 		PostgresBinDir: strings.TrimSpace(getenv("EMBEDDED_POSTGRES_CACHE_DIR")),
@@ -164,4 +172,26 @@ func webAuthUsersFromEnv(getenv func(string) string, readFile func(string) ([]by
 		return nil, fmt.Errorf("WEB_AUTH_USERS: %w", err)
 	}
 	return users, nil
+}
+
+// listenHostFromEnv reads LISTEN_HOST. Anything beyond loopback puts the UI, the
+// API and through them agents with a terminal on the network, so it is refused
+// unless browser sign-in is configured: the bearer token alone was never meant
+// to guard a port other machines can reach.
+func listenHostFromEnv(raw string, webAuth bool) (string, error) {
+	host := strings.TrimSpace(raw)
+	if host == "" || host == "127.0.0.1" {
+		return "", nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "", fmt.Errorf("LISTEN_HOST %q is not an IP address", host)
+	}
+	if ip.IsLoopback() {
+		return ip.String(), nil
+	}
+	if !webAuth {
+		return "", errors.New("LISTEN_HOST exposes the server to the network; set WEB_AUTH_USERS or WEB_AUTH_USERS_FILE so it asks for a sign-in")
+	}
+	return ip.String(), nil
 }

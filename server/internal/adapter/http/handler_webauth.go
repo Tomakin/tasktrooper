@@ -18,6 +18,9 @@ const (
 	// The __Host- prefix makes the browser refuse the cookie unless it is
 	// Secure, has Path=/ and no Domain — so no sibling host can plant or read it.
 	webSessionCookie = "__Host-tt_session"
+	// insecureWebSessionCookie is the plain-http spelling (WEB_COOKIE_INSECURE):
+	// the prefix is only valid on a Secure cookie.
+	insecureWebSessionCookie = "tt_session"
 	// webCSRFHeader must accompany every state-changing request authenticated
 	// by the cookie. A cross-site form cannot set a custom header, and a
 	// cross-site fetch that does triggers a preflight this server never grants.
@@ -67,7 +70,7 @@ func (h *Handler) WebLogin(c *fiber.Ctx) error {
 		return internalError(c, err)
 	}
 	log.Info().Str("user", sess.Username).Str("addr", addr).Msg("web sign-in")
-	setWebSessionCookie(c, token, h.webAuth.SessionTTL())
+	h.setWebSessionCookie(c, token, h.webAuth.SessionTTL())
 	return c.JSON(fiber.Map{"username": sess.Username})
 }
 
@@ -75,15 +78,15 @@ func (h *Handler) WebLogout(c *fiber.Ctx) error {
 	if !hasWebCSRFHeader(c) {
 		return csrfRejected(c)
 	}
-	if err := h.webAuth.Logout(c.UserContext(), c.Cookies(webSessionCookie)); err != nil {
+	if err := h.webAuth.Logout(c.UserContext(), c.Cookies(h.sessionCookieName())); err != nil {
 		return internalError(c, err)
 	}
-	clearWebSessionCookie(c)
+	h.clearWebSessionCookie(c)
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func (h *Handler) WebMe(c *fiber.Ctx) error {
-	sess, err := h.webAuth.Authenticate(c.UserContext(), c.Cookies(webSessionCookie))
+	sess, err := h.webAuth.Authenticate(c.UserContext(), c.Cookies(h.sessionCookieName()))
 	if err != nil {
 		if !errors.Is(err, webauth.ErrUnauthenticated) {
 			log.Warn().Err(err).Msg("web session lookup failed")
@@ -96,7 +99,7 @@ func (h *Handler) WebMe(c *fiber.Ctx) error {
 // authenticateWebSession is authMiddleware's second path, taken only when the
 // request carries no Authorization header and web sign-in is configured.
 func (h *Handler) authenticateWebSession(c *fiber.Ctx) error {
-	token := c.Cookies(webSessionCookie)
+	token := c.Cookies(h.sessionCookieName())
 	if token == "" {
 		return unauthorized(c)
 	}
@@ -115,26 +118,33 @@ func (h *Handler) authenticateWebSession(c *fiber.Ctx) error {
 	return c.Next()
 }
 
-func setWebSessionCookie(c *fiber.Ctx, token string, ttl time.Duration) {
+func (h *Handler) sessionCookieName() string {
+	if h.webCookieInsecure {
+		return insecureWebSessionCookie
+	}
+	return webSessionCookie
+}
+
+func (h *Handler) setWebSessionCookie(c *fiber.Ctx, token string, ttl time.Duration) {
 	c.Cookie(&fiber.Cookie{
-		Name:     webSessionCookie,
+		Name:     h.sessionCookieName(),
 		Value:    token,
 		Path:     "/",
 		MaxAge:   int(ttl.Seconds()),
-		Secure:   true,
+		Secure:   !h.webCookieInsecure,
 		HTTPOnly: true,
 		SameSite: fiber.CookieSameSiteStrictMode,
 	})
 }
 
-func clearWebSessionCookie(c *fiber.Ctx) {
+func (h *Handler) clearWebSessionCookie(c *fiber.Ctx) {
 	c.Cookie(&fiber.Cookie{
-		Name:     webSessionCookie,
+		Name:     h.sessionCookieName(),
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
-		Secure:   true,
+		Secure:   !h.webCookieInsecure,
 		HTTPOnly: true,
 		SameSite: fiber.CookieSameSiteStrictMode,
 	})
@@ -154,14 +164,20 @@ func isSafeMethod(method string) bool {
 	return method == fiber.MethodGet || method == fiber.MethodHead || method == fiber.MethodOptions
 }
 
-// clientAddr is the address a sign-in lockout is keyed on. The listener is
-// bound to loopback, so CF-Connecting-IP can only have been set by a process on
-// this machine — cloudflared, when the server is published through a tunnel.
+// clientAddr is the address a sign-in lockout is keyed on. CF-Connecting-IP
+// is believed only from a loopback peer — cloudflared on this machine. With
+// LISTEN_HOST the server also answers the network directly, and a client there
+// could otherwise send a fresh header value on every attempt and never be
+// locked out.
 func clientAddr(c *fiber.Ctx) string {
+	peer := c.IP()
+	if ip := net.ParseIP(peer); ip == nil || !ip.IsLoopback() {
+		return peer
+	}
 	if cf := strings.TrimSpace(c.Get("CF-Connecting-IP")); cf != "" {
 		if ip := net.ParseIP(cf); ip != nil {
 			return ip.String()
 		}
 	}
-	return c.IP()
+	return peer
 }

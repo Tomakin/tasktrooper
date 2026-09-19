@@ -74,6 +74,8 @@ Optional:
 | `SHUTDOWN_GRACE` | `9m` | How long to keep working after SIGTERM before in-flight runs are cancelled |
 | `WEB_UI_DIR` | — | A built `desktop/ui/dist`. Set, the server serves the UI itself at `/` (SPA fallback), so a browser reaches UI and API on one origin |
 | `WEB_AUTH_USERS` | — | Browser sign-in: `name:bcrypt-hash` entries, comma or newline separated. Empty (and no file) ⇒ web sign-in off, the bearer token is the only credential |
+| `LISTEN_HOST` | `127.0.0.1` | An extra address to serve on, same port — e.g. the machine's LAN address. The loopback listener, the `LISTENING` line and the MCP callback URL stay on 127.0.0.1. Anything beyond loopback **requires web sign-in** or the server refuses to start. `0.0.0.0` is accepted; a single LAN address is narrower |
+| `WEB_COOKIE_INSECURE` | — | `1` issues the session cookie as `tt_session` without `Secure`, so a browser keeps it over plain http (a LAN address). Never set it behind https |
 | `WEB_AUTH_USERS_FILE` | — | Same entries, one per line (`#` comments allowed); merged with `WEB_AUTH_USERS`. Prefer it when the env file is sourced by a shell, which would expand the `$` in a hash |
 
 ### Web sign-in
@@ -86,8 +88,9 @@ the session cookie (`__Host-tt_session`: `HttpOnly`, `Secure`,
 GET/HEAD/OPTIONS, and the login/logout calls themselves, must carry
 `X-TaskTrooper-Web: 1`. Five failed sign-ins for one username from one address
 within 15 minutes lock that pair for 15 minutes; the address is
-`CF-Connecting-IP` when present. The listener still binds `127.0.0.1` only —
-publishing it is a reverse proxy's or tunnel's job. Make an entry with
+`CF-Connecting-IP` when the request comes from loopback (cloudflared), the peer
+address otherwise. The listener binds `127.0.0.1` unless `LISTEN_HOST` adds
+another address. Make an entry with
 `go run ./cmd/web-passwd <name>` (bcrypt cost 12; the password is read from the
 terminal, never argv).
 

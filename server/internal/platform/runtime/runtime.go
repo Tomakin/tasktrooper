@@ -210,6 +210,14 @@ type Options struct {
 	// WebAuthUsers turn on browser sign-in (POST /auth/login) beside the
 	// bearer token. Empty keeps the bearer as the only way in.
 	WebAuthUsers []webauth.User
+	// ListenHost adds a listener beyond loopback (LISTEN_HOST). Empty is the
+	// local-only default; cmd/agent-server refuses anything else without web
+	// sign-in.
+	ListenHost string
+	// WebCookieInsecure drops Secure (and so the __Host- prefix) from the
+	// session cookie, for plain-http access over a LAN, where a browser would
+	// otherwise refuse to store it.
+	WebCookieInsecure bool
 }
 
 type Server struct {
@@ -415,12 +423,15 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 	// few milliseconds it takes to register the routes. Waiting is the correct
 	// outcome; being told the wrong port, or none, is not.
 	portNum := configuredPort(e.cfg, opts)
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", portNum))
+	listener, addr, err := openListeners(opts.ListenHost, portNum)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("listen: %w", err)
 	}
-	addr := listener.Addr().String()
+	if opts.ListenHost != "" && opts.ListenHost != "127.0.0.1" {
+		log.Warn().Str("listen_host", opts.ListenHost).Str("port", addr[strings.LastIndex(addr, ":")+1:]).
+			Msg("serving beyond this machine: the UI and API are reachable from the network")
+	}
 	e.mcpEndpoint = &mcpEndpoint{}
 	e.mcpEndpoint.publish(addr)
 
@@ -2687,6 +2698,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		UIRoot:            opts.UIRoot,
 		UIFS:              opts.UIFS,
 		WebAuth:           webAuthSvc,
+		WebCookieInsecure: opts.WebCookieInsecure,
 		// Nil unless the Claude Code executor registered, in which case no /mcp
 		// route is mounted at all.
 		MCPToolServer: e.mcpServer,

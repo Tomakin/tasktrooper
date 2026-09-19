@@ -39,6 +39,10 @@ var processSecretVars = []string{
 	// engine derives the cipher once before this runs and hands the derived
 	// cipher to every later caller (see engine.initSecretsCipher).
 	"MCP_SECRETS_KEY",
+	// bcrypt hashes of the web sign-in passwords. Consumed by optionsFromEnv →
+	// Options.WebAuthUsers; nothing re-reads it. An agent that could read the
+	// hashes could try to crack them offline.
+	"WEB_AUTH_USERS",
 }
 
 // scrubProcessSecrets removes the pod's injected credentials from the process

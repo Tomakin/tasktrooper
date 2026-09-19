@@ -40,10 +40,19 @@ work; it is the authority, this section is the summary.
 
 ## Auth
 
-There is no login screen and no account. `src/lib/auth.ts` resolves one bearer
-token — the desktop shell's `window.__tasktrooperDesktop.apiToken`, else
-`VITE_API_KEY` — and `main.tsx` renders `ConfigErrorPage` when there is none.
-Nothing else in `src/` may read a credential.
+`src/lib/auth.ts` resolves one bearer token — the desktop shell's
+`window.__tasktrooperDesktop.apiToken`, else `VITE_API_KEY`. With a token there
+is no sign-in and nothing below changes.
+
+With no token the server itself is serving this app to a browser
+(`WEB_UI_DIR`). `auth/WebSessionGate` (in `App.tsx`, above everything that
+calls the API) asks `GET /auth/me`: 200 renders the app, 401 renders
+`LoginPage`, 404 (web sign-in off on the server) renders `ConfigErrorPage`. The
+session is an HttpOnly cookie this code never sees; `authHeaders()` adds
+`X-TaskTrooper-Web: 1` instead of a bearer, and `request()` dispatches
+`SESSION_EXPIRED_EVENT` on a 401 so the gate returns to the sign-in page.
+`useWebSession()` is null in the desktop shell. Nothing else in `src/` may read
+a credential.
 
 ## API calls
 
@@ -53,7 +62,8 @@ Nothing else in `src/` may read a credential.
   `VITE_API_BASE`, else nothing (the dev proxy).
 - Never point an `<img src>` at `/v1/attachments/{id}` — it needs the
   Authorization header; use `attachments/useAttachmentBlob`.
-- No route outside `/v1`, `/admin` and `/health` exists. There is no gateway,
+- No route outside `/v1`, `/admin`, `/health` and the web sign-in routes
+  (`/auth/login`, `/auth/logout`, `/auth/me`) exists. There is no gateway,
   no control plane and no OAuth broker to call.
 
 ## Desktop bridge

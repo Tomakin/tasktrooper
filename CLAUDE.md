@@ -17,6 +17,10 @@ Three parts, one product: the macOS desktop app. Read the directory's own
   one bearer token: the desktop generates it and passes it to the server as
   `SERVER_API_KEY` and to the page as `window.__tasktrooperDesktop.apiToken`;
   `make dev` uses `VITE_API_KEY`.
+- **Optional web sign-in (this fork).** With `WEB_UI_DIR` and
+  `WEB_AUTH_USERS`/`WEB_AUTH_USERS_FILE` set, the server also serves the UI and
+  accepts a session cookie from `POST /auth/login` beside the bearer token. Off
+  by default; the desktop path is unchanged. See `server/README.md`.
 - **The desktop app is the backend's supervisor.** It spawns `bin/agent-server`
   with `PORT=0`, reads the `LISTENING http://127.0.0.1:<port>` line, polls
   `/health`, then opens the window. The server starts its own Postgres from

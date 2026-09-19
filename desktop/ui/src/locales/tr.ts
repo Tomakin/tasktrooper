@@ -30,8 +30,26 @@ export const tr: Dict = {
     },
     configError: {
       title: "Yapılandırma hatası",
-      body: "Bu build'de yerel sunucu için API anahtarı yok, bu yüzden her istek reddedilir. VITE_API_KEY değerini (sunucudaki SERVER_API_KEY ile aynı olmalı) verip yeniden build alın.",
+      body: "Bu sürümde yerel sunucu için API anahtarı bulunmuyor; bu nedenle her istek reddedilir. VITE_API_KEY değerini (sunucudaki SERVER_API_KEY ile aynı olmalıdır) tanımlayıp uygulamayı yeniden derleyin ya da sunucuda web oturumunu etkinleştirin.",
       missing: "Eksik:",
+    },
+  },
+  auth: {
+    login: {
+      title: "Oturum aç",
+      subtitle: "TaskTrooper'a devam etmek için kullanıcı adınızı ve parolanızı girin.",
+      username: "Kullanıcı adı",
+      password: "Parola",
+      submit: "Oturum aç",
+      submitting: "Oturum açılıyor…",
+      invalid: "Kullanıcı adı veya parola hatalı.",
+      locked: "Çok sayıda hatalı deneme yapıldı. {minutes} dakika sonra yeniden deneyin.",
+      failed: "Oturum açılamadı. Lütfen yeniden deneyin.",
+      expired: "Oturumunuzun süresi doldu. Lütfen yeniden oturum açın.",
+    },
+    session: {
+      signedInAs: "{name} olarak oturum açıldı",
+      signOut: "Oturumu kapat",
     },
   },
   settings: {

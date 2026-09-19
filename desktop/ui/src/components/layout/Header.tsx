@@ -2,6 +2,7 @@ import { Menu, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HealthStatus } from "@/components/layout/HealthStatus";
 import { NotificationCenter } from "@/components/layout/NotificationCenter";
+import { SessionMenu } from "@/components/layout/SessionMenu";
 import { SidebarBrand } from "@/components/layout/SidebarBrand";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
@@ -54,6 +55,7 @@ export function Header({ title, onMenuClick, sidebarCollapsed = false, onAgentSe
         >
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
+        <SessionMenu />
       </div>
     </header>
   );

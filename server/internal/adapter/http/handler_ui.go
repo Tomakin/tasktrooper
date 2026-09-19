@@ -62,6 +62,7 @@ func (h *Handler) registerUIRoutes(app *fiber.App) {
 func isServerPath(path string) bool {
 	return strings.HasPrefix(path, "/v1") || strings.HasPrefix(path, "/admin") ||
 		path == "/health" || path == "/metrics" || strings.HasPrefix(path, "/docs") ||
+		strings.HasPrefix(path, webAuthPrefix) ||
 		// The Claude Code tool endpoint. Answering a JSON-RPC call with an HTML
 		// page makes the CLI report a parse error rather than a missing route.
 		path == mcpserver.Path
@@ -84,8 +85,14 @@ func (h *Handler) registerEmbeddedUI(app *fiber.App, assets fs.FS) {
 }
 
 func (h *Handler) isPublicPath(path string) bool {
-	if path == "/health" || path == "/metrics" || path == "/docs" || hasPrefix(path, "/docs/") {
+	if path == "/health" || path == "/docs" || hasPrefix(path, "/docs/") {
 		return true
+	}
+	// Loopback-only, the request counters are nobody else's business anyway;
+	// once web sign-in is on the server is meant to be published, and route
+	// names and traffic are not for the internet.
+	if path == "/metrics" {
+		return h.webAuth == nil
 	}
 	// GitHub cannot send a bearer token; the webhook authenticates every
 	// request itself via the per-repo HMAC signature.

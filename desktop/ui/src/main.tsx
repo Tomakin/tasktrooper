@@ -2,8 +2,6 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "@/App";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { ConfigErrorPage } from "@/pages/ConfigErrorPage";
-import { getApiToken } from "@/lib/auth";
 // Bundled rather than fetched from Google: the packaged app serves this SPA from
 // app://tasktrooper and has to render with no network at all.
 import "@fontsource-variable/inter";
@@ -15,19 +13,9 @@ function main() {
   const rootEl = document.getElementById("root");
   if (!rootEl) return;
 
-  // There is no sign-in screen: the bearer token is stated by the desktop shell
-  // or compiled in for browser development. With neither, every call would 401,
-  // so say what is missing instead of mounting an app that cannot talk to
-  // anything.
-  if (!getApiToken()) {
-    createRoot(rootEl).render(
-      <StrictMode>
-        <ConfigErrorPage missing={["VITE_API_KEY"]} />
-      </StrictMode>,
-    );
-    return;
-  }
-
+  // With no bearer token (desktop shell or VITE_API_KEY) the app is being served
+  // to a browser by the server itself; WebSessionGate in App asks for a sign-in,
+  // or shows the configuration error when the server has web sign-in off.
   createRoot(rootEl).render(
     <StrictMode>
       <ErrorBoundary>

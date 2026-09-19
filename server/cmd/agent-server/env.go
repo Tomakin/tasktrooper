@@ -3,11 +3,13 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/webauth"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/runtime"
 )
 
@@ -89,6 +91,11 @@ func optionsFromEnv(getenv func(string) string) (localConfig, error) {
 		port = p
 	}
 
+	webUsers, err := webAuthUsersFromEnv(getenv, os.ReadFile)
+	if err != nil {
+		return localConfig{}, err
+	}
+
 	dsn := strings.TrimSpace(getenv("DATABASE_URL"))
 	return localConfig{
 		Options: runtime.Options{
@@ -104,6 +111,8 @@ func optionsFromEnv(getenv func(string) string) (localConfig, error) {
 			CORSOrigins:       corsOriginsFromEnv(getenv("CORS_ORIGINS")),
 			EmbeddingsBaseURL: strings.TrimSpace(getenv("EMBEDDINGS_BASE_URL")),
 			AllowedRoots:      allowedRootsFromEnv(getenv("ALLOWED_ROOTS")),
+			UIRoot:            strings.TrimSpace(getenv("WEB_UI_DIR")),
+			WebAuthUsers:      webUsers,
 		},
 		PostgresDSN:    dsn,
 		PostgresBinDir: strings.TrimSpace(getenv("EMBEDDED_POSTGRES_CACHE_DIR")),
@@ -134,4 +143,25 @@ func corsOriginsFromEnv(raw string) []string {
 		return runtime.DefaultCORSOrigins
 	}
 	return out
+}
+
+// webAuthUsersFromEnv reads WEB_AUTH_USERS and WEB_AUTH_USERS_FILE; both may be
+// set and are merged. The file form exists because a bcrypt hash is full of `$`,
+// which an env file sourced by a shell would expand. A malformed entry fails
+// boot: a sign-in that silently lost a user is worse than a server that says
+// why it did not start.
+func webAuthUsersFromEnv(getenv func(string) string, readFile func(string) ([]byte, error)) ([]webauth.User, error) {
+	raw := getenv("WEB_AUTH_USERS")
+	if path := strings.TrimSpace(getenv("WEB_AUTH_USERS_FILE")); path != "" {
+		b, err := readFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("WEB_AUTH_USERS_FILE: %w", err)
+		}
+		raw += "\n" + string(b)
+	}
+	users, err := webauth.ParseUsers(raw)
+	if err != nil {
+		return nil, fmt.Errorf("WEB_AUTH_USERS: %w", err)
+	}
+	return users, nil
 }

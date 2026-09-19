@@ -31,8 +31,26 @@ export const en = {
     },
     configError: {
       title: "Configuration error",
-      body: "This build has no API key for the local server, so every request would be refused. Set VITE_API_KEY (it must match the server's SERVER_API_KEY) and rebuild.",
+      body: "This build has no API key for the local server, so every request would be refused. Set VITE_API_KEY (it must match the server's SERVER_API_KEY) and rebuild, or enable web sign-in on the server.",
       missing: "Missing:",
+    },
+  },
+  auth: {
+    login: {
+      title: "Sign in",
+      subtitle: "Enter your username and password to continue to TaskTrooper.",
+      username: "Username",
+      password: "Password",
+      submit: "Sign in",
+      submitting: "Signing in…",
+      invalid: "The username or password is incorrect.",
+      locked: "Too many failed attempts. Try again in {minutes} minutes.",
+      failed: "Sign-in failed. Please try again.",
+      expired: "Your session has ended. Please sign in again.",
+    },
+    session: {
+      signedInAs: "Signed in as {name}",
+      signOut: "Sign out",
     },
   },
   settings: {

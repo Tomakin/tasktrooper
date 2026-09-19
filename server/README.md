@@ -72,8 +72,26 @@ Optional:
 | `CHROME_BIN` | — | Chromium for the `browser_*` tools |
 | `CONFIG_PATH` | `resources/config.yml` | Config file; falls back to the copy compiled into the binary when the file is absent |
 | `SHUTDOWN_GRACE` | `9m` | How long to keep working after SIGTERM before in-flight runs are cancelled |
+| `WEB_UI_DIR` | — | A built `desktop/ui/dist`. Set, the server serves the UI itself at `/` (SPA fallback), so a browser reaches UI and API on one origin |
+| `WEB_AUTH_USERS` | — | Browser sign-in: `name:bcrypt-hash` entries, comma or newline separated. Empty (and no file) ⇒ web sign-in off, the bearer token is the only credential |
+| `WEB_AUTH_USERS_FILE` | — | Same entries, one per line (`#` comments allowed); merged with `WEB_AUTH_USERS`. Prefer it when the env file is sourced by a shell, which would expand the `$` in a hash |
 
-`DATABASE_URL`, `SERVER_API_KEY` and `MCP_SECRETS_KEY` are dropped from the
+### Web sign-in
+
+With `WEB_AUTH_USERS`/`WEB_AUTH_USERS_FILE` set, `POST /auth/login`
+(`{"username","password"}`), `POST /auth/logout` and `GET /auth/me` exist, and
+every `/v1`, `/admin` and `/metrics` route accepts either the bearer token or
+the session cookie (`__Host-tt_session`: `HttpOnly`, `Secure`,
+`SameSite=Strict`, 7 days, sliding). Cookie-authenticated requests other than
+GET/HEAD/OPTIONS, and the login/logout calls themselves, must carry
+`X-TaskTrooper-Web: 1`. Five failed sign-ins for one username from one address
+within 15 minutes lock that pair for 15 minutes; the address is
+`CF-Connecting-IP` when present. The listener still binds `127.0.0.1` only —
+publishing it is a reverse proxy's or tunnel's job. Make an entry with
+`go run ./cmd/web-passwd <name>` (bcrypt cost 12; the password is read from the
+terminal, never argv).
+
+`DATABASE_URL`, `SERVER_API_KEY`, `MCP_SECRETS_KEY` and `WEB_AUTH_USERS` are dropped from the
 process environment once read
 ([`internal/platform/runtime/envscrub.go`](internal/platform/runtime/envscrub.go))
 so an agent's child process cannot reach them.

@@ -1,11 +1,15 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/application/webauth"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/runtime"
 )
 
@@ -167,4 +171,72 @@ func TestShutdownGraceFromEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWebAuthUsersFromEnv(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("pw"), webauth.MinBcryptCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noFile := func(string) ([]byte, error) { t.Fatal("no file configured"); return nil, nil }
+
+	t.Run("unset means web sign-in is off", func(t *testing.T) {
+		cfg, err := optionsFromEnv(fakeEnv(validEnv()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.Options.WebAuthUsers) != 0 || cfg.Options.UIRoot != "" {
+			t.Fatalf("users=%v uiRoot=%q", cfg.Options.WebAuthUsers, cfg.Options.UIRoot)
+		}
+	})
+
+	t.Run("inline and file entries merge", func(t *testing.T) {
+		env := map[string]string{
+			"WEB_AUTH_USERS":      "alice:" + string(hash),
+			"WEB_AUTH_USERS_FILE": "/etc/users",
+		}
+		users, err := webAuthUsersFromEnv(fakeEnv(env), func(p string) ([]byte, error) {
+			if p != "/etc/users" {
+				t.Fatalf("read %q", p)
+			}
+			return []byte("# web users\nbob:" + string(hash) + "\n"), nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(users) != 2 || users[0].Name != "alice" || users[1].Name != "bob" {
+			t.Fatalf("users = %+v", users)
+		}
+	})
+
+	t.Run("a malformed entry fails boot", func(t *testing.T) {
+		if _, err := webAuthUsersFromEnv(fakeEnv(map[string]string{"WEB_AUTH_USERS": "alice:plaintext"}), noFile); err == nil {
+			t.Fatal("expected an error")
+		}
+		env := validEnv()
+		env["WEB_AUTH_USERS"] = "alice"
+		if _, err := optionsFromEnv(fakeEnv(env)); err == nil {
+			t.Fatal("optionsFromEnv should refuse it too")
+		}
+	})
+
+	t.Run("an unreadable file fails boot", func(t *testing.T) {
+		_, err := webAuthUsersFromEnv(fakeEnv(map[string]string{"WEB_AUTH_USERS_FILE": "/missing"}),
+			func(string) ([]byte, error) { return nil, os.ErrNotExist })
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+	})
+
+	t.Run("WEB_UI_DIR sets the UI root", func(t *testing.T) {
+		env := validEnv()
+		env["WEB_UI_DIR"] = " /srv/ui/dist "
+		cfg, err := optionsFromEnv(fakeEnv(env))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Options.UIRoot != "/srv/ui/dist" {
+			t.Fatalf("uiRoot = %q", cfg.Options.UIRoot)
+		}
+	})
 }

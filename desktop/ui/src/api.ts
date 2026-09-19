@@ -1,5 +1,5 @@
 import { apiUrl } from "@/lib/apiBase";
-import { getApiToken } from "@/lib/auth";
+import { getApiToken, isWebSessionMode, SESSION_EXPIRED_EVENT, WEB_SESSION_HEADER } from "@/lib/auth";
 import { createChatStreamDecoder, type ChatStreamEvent } from "@/lib/sse";
 
 export interface ToolPolicy {
@@ -2207,7 +2207,7 @@ export function authHeaders(extra: Record<string, string> = {}): Record<string, 
   if (token) {
     return { ...extra, Authorization: `Bearer ${token}` };
   }
-  return extra;
+  return { ...extra, [WEB_SESSION_HEADER]: "1" };
 }
 
 export function getStoredOrchestrate(): boolean {
@@ -2267,12 +2267,15 @@ function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 0): Promis
 export class ApiError extends Error {
   readonly status: number;
   readonly type: string;
+  /** Seconds from a Retry-After header, when the server sent one. */
+  readonly retryAfter?: number;
 
-  constructor(message: string, status: number, type = "") {
+  constructor(message: string, status: number, type = "", retryAfter?: number) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.type = type;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -2294,7 +2297,9 @@ async function apiErrorFrom(res: Response): Promise<ApiError> {
   } catch {
     /* keep text */
   }
-  return new ApiError(message || `HTTP ${res.status}`, res.status, type);
+  const retryAfterHeader = Number(res.headers.get("retry-after"));
+  const retryAfter = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader : undefined;
+  return new ApiError(message || `HTTP ${res.status}`, res.status, type, retryAfter);
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -2317,6 +2322,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw e;
   }
   if (!res.ok) {
+    // /auth/* answers 401 for a wrong password or no session yet; the sign-in
+    // flow handles those itself.
+    if (res.status === 401 && isWebSessionMode() && !path.startsWith("/auth/")) {
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    }
     throw await apiErrorFrom(res);
   }
   if (res.status === 204 || res.status === 205) {
@@ -2398,8 +2408,16 @@ export function attachmentUrl(id: string): string {
   return apiUrl(`/v1/attachments/${id}`);
 }
 
+export interface WebSessionUser {
+  username: string;
+}
+
 export const api = {
   health: () => request<HealthResponse>("/health"),
+  webSession: () => request<WebSessionUser>("/auth/me"),
+  webLogin: (username: string, password: string) =>
+    request<WebSessionUser>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+  webLogout: () => request<void>("/auth/logout", { method: "POST" }),
   usageSummary: (days = 30) => request<UsageSummary>(`/v1/usage?days=${days}`),
   billingStatus: () => request<BillingStatus>("/v1/billing"),
   getBillingPlan: () => request<BillingPlan>("/admin/billing/plan"),

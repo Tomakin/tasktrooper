@@ -96,6 +96,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops/pipeline"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/vercelops"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/webauth"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
@@ -203,6 +204,9 @@ type Options struct {
 	// knows the port before then — so Run fills it in, and a reload then
 	// re-applies that value instead of the empty one config.yml expands to.
 	PublicBaseURL string
+	// WebAuthUsers turn on browser sign-in (POST /auth/login) beside the
+	// bearer token. Empty keeps the bearer as the only way in.
+	WebAuthUsers []webauth.User
 }
 
 type Server struct {
@@ -507,7 +511,7 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 	// be trusted as written.
 	app.Use(corsmw.New(corsmw.Config{
 		AllowOrigins: strings.Join(corsOrigins(opts), ","),
-		AllowHeaders: "Authorization,Content-Type,X-Request-ID",
+		AllowHeaders: "Authorization,Content-Type,X-Request-ID,X-TaskTrooper-Web",
 		AllowMethods: "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
 	}))
 
@@ -2561,6 +2565,21 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}
 	}
 
+	var webAuthSvc *webauth.Service
+	if len(opts.WebAuthUsers) > 0 {
+		if e.pgDB == nil {
+			log.Error().Msg("web sign-in is configured but there is no database for its sessions; browser sign-in stays off")
+		} else {
+			svc, err := webauth.NewService(webauth.Config{Users: opts.WebAuthUsers}, pgstore.NewWebSessionStore(e.pgDB))
+			if err != nil {
+				log.Error().Err(err).Msg("web sign-in stays off")
+			} else {
+				webAuthSvc = svc
+				log.Info().Int("users", len(opts.WebAuthUsers)).Msg("web sign-in enabled")
+			}
+		}
+	}
+
 	handler := httpadapter.NewHandler(httpadapter.Config{
 		AgentLoop:         e.agentLoop,
 		LLMClient:         llmClient,
@@ -2612,6 +2631,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		BillingSvc:        e.billingSvc,
 		UIRoot:            opts.UIRoot,
 		UIFS:              opts.UIFS,
+		WebAuth:           webAuthSvc,
 		// Nil unless the Claude Code executor registered, in which case no /mcp
 		// route is mounted at all.
 		MCPToolServer: e.mcpServer,

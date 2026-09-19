@@ -62,7 +62,7 @@ func (s *EnvScrubSuite) TestAbsentSecretsAreNotAnError() {
 // addition has to justify itself.
 func (s *EnvScrubSuite) TestScrubListStaysMinimal() {
 	s.ElementsMatch(
-		[]string{"DATABASE_URL", "SERVER_API_KEY", "MCP_SECRETS_KEY"},
+		[]string{"DATABASE_URL", "SERVER_API_KEY", "MCP_SECRETS_KEY", "WEB_AUTH_USERS"},
 		processSecretVars,
 	)
 

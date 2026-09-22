@@ -22,9 +22,9 @@ func NewBranchFlowStore(pool *DB) *BranchFlowStore {
 func (s *BranchFlowStore) GetFlow(ctx context.Context, repositoryID uuid.UUID) (domain.BranchFlow, error) {
 	var f domain.BranchFlow
 	err := s.pool.QueryRow(ctx, `
-		SELECT repository_id, integration_branch, updated_at
+		SELECT repository_id, integration_branch, release_branch, updated_at
 		FROM repository_branch_flow WHERE repository_id = $1
-	`, repositoryID).Scan(&f.RepositoryID, &f.IntegrationBranch, &f.UpdatedAt)
+	`, repositoryID).Scan(&f.RepositoryID, &f.IntegrationBranch, &f.ReleaseBranch, &f.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.BranchFlow{}, domain.ErrBranchFlowNotFound
 	}
@@ -36,7 +36,7 @@ func (s *BranchFlowStore) GetFlow(ctx context.Context, repositoryID uuid.UUID) (
 
 func (s *BranchFlowStore) ListFlows(ctx context.Context) ([]domain.BranchFlow, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT repository_id, integration_branch, updated_at FROM repository_branch_flow
+		SELECT repository_id, integration_branch, release_branch, updated_at FROM repository_branch_flow
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list branch flows: %w", err)
@@ -45,7 +45,7 @@ func (s *BranchFlowStore) ListFlows(ctx context.Context) ([]domain.BranchFlow, e
 	var out []domain.BranchFlow
 	for rows.Next() {
 		var f domain.BranchFlow
-		if err := rows.Scan(&f.RepositoryID, &f.IntegrationBranch, &f.UpdatedAt); err != nil {
+		if err := rows.Scan(&f.RepositoryID, &f.IntegrationBranch, &f.ReleaseBranch, &f.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -55,12 +55,13 @@ func (s *BranchFlowStore) ListFlows(ctx context.Context) ([]domain.BranchFlow, e
 
 func (s *BranchFlowStore) SetFlow(ctx context.Context, f domain.BranchFlow) (domain.BranchFlow, error) {
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO repository_branch_flow (repository_id, integration_branch, updated_at)
-		VALUES ($1, $2, now())
+		INSERT INTO repository_branch_flow (repository_id, integration_branch, release_branch, updated_at)
+		VALUES ($1, $2, $3, now())
 		ON CONFLICT (repository_id) DO UPDATE
-		SET integration_branch = EXCLUDED.integration_branch, updated_at = now()
-		RETURNING repository_id, integration_branch, updated_at
-	`, f.RepositoryID, f.IntegrationBranch).Scan(&f.RepositoryID, &f.IntegrationBranch, &f.UpdatedAt)
+		SET integration_branch = EXCLUDED.integration_branch,
+			release_branch = EXCLUDED.release_branch, updated_at = now()
+		RETURNING repository_id, integration_branch, release_branch, updated_at
+	`, f.RepositoryID, f.IntegrationBranch, f.ReleaseBranch).Scan(&f.RepositoryID, &f.IntegrationBranch, &f.ReleaseBranch, &f.UpdatedAt)
 	if err != nil {
 		return domain.BranchFlow{}, fmt.Errorf("set branch flow: %w", err)
 	}
@@ -75,17 +76,35 @@ func (s *BranchFlowStore) DeleteFlow(ctx context.Context, repositoryID uuid.UUID
 }
 
 const taskIntegrationColumns = `task_id, repository_id, branch, pr_number, pr_url, head_sha, merge_sha,
-	status, reason, detail, deploy_status, deploy_url, merged_at, updated_at`
+	status, reason, detail, deploy_status, deploy_url, merged_at, promote_to,
+	release_deploy_status, release_deploy_url, updated_at`
 
 func scanTaskIntegration(row pgx.Row) (domain.TaskIntegration, error) {
 	var t domain.TaskIntegration
-	var status, reason, deployStatus string
+	var status, reason, deployStatus, promoteTo, releaseDeploy string
 	err := row.Scan(&t.TaskID, &t.RepositoryID, &t.Branch, &t.PRNumber, &t.PRURL, &t.HeadSHA, &t.MergeSHA,
-		&status, &reason, &t.Detail, &deployStatus, &t.DeployURL, &t.MergedAt, &t.UpdatedAt)
+		&status, &reason, &t.Detail, &deployStatus, &t.DeployURL, &t.MergedAt, &promoteTo,
+		&releaseDeploy, &t.ReleaseDeployURL, &t.UpdatedAt)
 	t.Status = domain.IntegrationStatus(status)
 	t.Reason = domain.IntegrationReason(reason)
+	t.PromoteTo = domain.TaskColumn(promoteTo)
+	t.ReleaseDeployStatus = domain.IntegrationDeployStatus(releaseDeploy)
 	t.DeployStatus = domain.IntegrationDeployStatus(deployStatus)
 	return t, err
+}
+
+// TaskRepository resolves which repository a task belongs to, for the base
+// branch lookup the git client makes from a workspace path alone.
+func (s *BranchFlowStore) TaskRepository(ctx context.Context, taskID uuid.UUID) (uuid.UUID, error) {
+	var repositoryID uuid.UUID
+	err := s.pool.QueryRow(ctx, `SELECT repository_id FROM board_tasks WHERE id = $1`, taskID).Scan(&repositoryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, domain.ErrTaskIntegrationNotFound
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("task repository: %w", err)
+	}
+	return repositoryID, nil
 }
 
 func (s *BranchFlowStore) GetTaskIntegration(ctx context.Context, taskID uuid.UUID) (domain.TaskIntegration, error) {
@@ -103,18 +122,22 @@ func (s *BranchFlowStore) GetTaskIntegration(ctx context.Context, taskID uuid.UU
 func (s *BranchFlowStore) SaveTaskIntegration(ctx context.Context, in domain.TaskIntegration) (domain.TaskIntegration, error) {
 	out, err := scanTaskIntegration(s.pool.QueryRow(ctx, `
 		INSERT INTO task_integration (task_id, repository_id, branch, pr_number, pr_url, head_sha, merge_sha,
-			status, reason, detail, deploy_status, deploy_url, merged_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now())
+			status, reason, detail, deploy_status, deploy_url, merged_at, promote_to,
+			release_deploy_status, release_deploy_url, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
 		ON CONFLICT (task_id) DO UPDATE SET
 			repository_id = EXCLUDED.repository_id, branch = EXCLUDED.branch,
 			pr_number = EXCLUDED.pr_number, pr_url = EXCLUDED.pr_url,
 			head_sha = EXCLUDED.head_sha, merge_sha = EXCLUDED.merge_sha,
 			status = EXCLUDED.status, reason = EXCLUDED.reason, detail = EXCLUDED.detail,
 			deploy_status = EXCLUDED.deploy_status, deploy_url = EXCLUDED.deploy_url,
-			merged_at = EXCLUDED.merged_at, updated_at = now()
+			merged_at = EXCLUDED.merged_at, promote_to = EXCLUDED.promote_to,
+			release_deploy_status = EXCLUDED.release_deploy_status,
+			release_deploy_url = EXCLUDED.release_deploy_url, updated_at = now()
 		RETURNING `+taskIntegrationColumns,
 		in.TaskID, in.RepositoryID, in.Branch, in.PRNumber, in.PRURL, in.HeadSHA, in.MergeSHA,
-		string(in.Status), string(in.Reason), in.Detail, string(in.DeployStatus), in.DeployURL, in.MergedAt))
+		string(in.Status), string(in.Reason), in.Detail, string(in.DeployStatus), in.DeployURL, in.MergedAt,
+		string(in.PromoteTo), string(in.ReleaseDeployStatus), in.ReleaseDeployURL))
 	if err != nil {
 		return domain.TaskIntegration{}, fmt.Errorf("save task integration: %w", err)
 	}

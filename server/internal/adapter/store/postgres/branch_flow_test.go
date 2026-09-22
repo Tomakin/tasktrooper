@@ -38,8 +38,11 @@ func TestBranchFlowStore(t *testing.T) {
 	if _, err := store.GetFlow(ctx, repo.ID); !errors.Is(err, domain.ErrBranchFlowNotFound) {
 		t.Fatalf("no flow yet: %v", err)
 	}
-	if _, err := store.SetFlow(ctx, domain.BranchFlow{RepositoryID: repo.ID, IntegrationBranch: "development"}); err != nil {
+	if _, err := store.SetFlow(ctx, domain.BranchFlow{RepositoryID: repo.ID, IntegrationBranch: "development", ReleaseBranch: "master"}); err != nil {
 		t.Fatal(err)
+	}
+	if f, err := store.GetFlow(ctx, repo.ID); err != nil || f.ReleaseBranch != "master" {
+		t.Fatalf("release branch: %+v %v", f, err)
 	}
 	if f, err := store.SetFlow(ctx, domain.BranchFlow{RepositoryID: repo.ID, IntegrationBranch: "dev"}); err != nil || f.IntegrationBranch != "dev" {
 		t.Fatalf("upsert: %+v %v", f, err)
@@ -64,7 +67,8 @@ func TestBranchFlowStore(t *testing.T) {
 	merged := time.Now().UTC().Truncate(time.Microsecond)
 	in := domain.TaskIntegration{
 		TaskID: task.ID, RepositoryID: repo.ID, Branch: "dev", PRNumber: 12, PRURL: "u", HeadSHA: "h",
-		MergeSHA: "m", Status: domain.IntegrationMerged, Reason: domain.IntegrationReasonChecksPending, DeployStatus: domain.IntegrationDeployPending, MergedAt: &merged,
+		MergeSHA: "m", Status: domain.IntegrationMerged, Reason: domain.IntegrationReasonChecksPending,
+		PromoteTo: domain.TaskColumnReadyForQA, ReleaseDeployStatus: domain.IntegrationDeployPending, ReleaseDeployURL: "prod", DeployStatus: domain.IntegrationDeployPending, MergedAt: &merged,
 	}
 	if _, err := store.SaveTaskIntegration(ctx, in); err != nil {
 		t.Fatal(err)
@@ -76,8 +80,17 @@ func TestBranchFlowStore(t *testing.T) {
 	}
 	got, err := store.GetTaskIntegration(ctx, task.ID)
 	if err != nil || got.DeployStatus != domain.IntegrationDeploySuccess || got.DeployURL != "run" ||
-		got.Status != domain.IntegrationMerged || got.Reason != domain.IntegrationReasonChecksPending || got.MergedAt == nil || !got.MergedAt.Equal(merged) || got.PRNumber != 12 {
+		got.Status != domain.IntegrationMerged || got.Reason != domain.IntegrationReasonChecksPending ||
+		got.PromoteTo != domain.TaskColumnReadyForQA || got.ReleaseDeployStatus != domain.IntegrationDeployPending ||
+		got.ReleaseDeployURL != "prod" || got.MergedAt == nil || !got.MergedAt.Equal(merged) || got.PRNumber != 12 {
 		t.Fatalf("round trip: %+v %v", got, err)
+	}
+
+	if got, err := store.TaskRepository(ctx, task.ID); err != nil || got != repo.ID {
+		t.Fatalf("task repository: %v %v", got, err)
+	}
+	if _, err := store.TaskRepository(ctx, uuid.New()); !errors.Is(err, domain.ErrTaskIntegrationNotFound) {
+		t.Fatalf("unknown task: %v", err)
 	}
 
 	if err := store.DeleteFlow(ctx, repo.ID); err != nil {

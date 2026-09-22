@@ -2025,6 +2025,14 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 			return task, nil
 		}
 	}
+	// Two-stage delivery: a passing review hands the task to the flow, not to
+	// QA. The card waits in code_review until its change is on the integration
+	// branch and that deploy is green, and the flow makes the move itself.
+	if req.Column != nil && *req.Column != prevColumn && s.branchFlow != nil {
+		if s.branchFlow.HoldReviewPromotion(ctx, task, prevColumn, *req.Column, req.Actor) {
+			return task, nil
+		}
+	}
 	// The release gate compares the commit a task was signed off at against the
 	// branch as it stands at dispatch time, so the stamp has to be written by
 	// the move that earns it — in the same write, or a crash in between leaves

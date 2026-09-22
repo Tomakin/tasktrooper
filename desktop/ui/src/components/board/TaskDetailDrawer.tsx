@@ -30,6 +30,7 @@ import { AttachmentDropzone } from "@/components/attachments/AttachmentDropzone"
 import { AttachmentList } from "@/components/attachments/AttachmentList";
 import { PlanView } from "@/components/chat/PlanView";
 import { HumanUatDecision } from "@/components/board/HumanUatDecision";
+import { TaskIntegrationPanel } from "@/components/board/TaskIntegrationPanel";
 import { AnalizReviewDecision } from "@/components/board/AnalizReviewDecision";
 import { PipelineSection } from "@/components/board/PipelineSection";
 import { TaskAssigneeFields } from "@/components/board/TaskAssigneeFields";
@@ -591,6 +592,7 @@ export function TaskDetailDrawer({
                     in the scroll area, above even the blocked-park banner, so
                     it cannot be missed the way the old low-contrast inline
                     buttons were. */}
+                <TaskIntegrationPanel task={task} repositoryId={repositoryId} />
                 <HumanUatDecision task={task} repositoryId={repositoryId} onUpdated={onUpdated} />
                 <AnalizReviewDecision task={task} repositoryId={repositoryId} onUpdated={onUpdated} />
                 {/* A parked task is waiting on a human, so the question outranks

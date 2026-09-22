@@ -14,7 +14,10 @@ import (
 type BranchFlow struct {
 	RepositoryID      uuid.UUID `json:"repository_id"`
 	IntegrationBranch string    `json:"integration_branch"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	// ReleaseBranch is where a task's own pull request is opened and, at the
+	// end, merged. Empty means the repository's GitHub default branch.
+	ReleaseBranch string    `json:"release_branch"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type IntegrationStatus string
@@ -32,15 +35,16 @@ const (
 type IntegrationReason string
 
 const (
-	IntegrationReasonNoToken       IntegrationReason = "no_token"
-	IntegrationReasonNoPullRequest IntegrationReason = "no_pull_request"
-	IntegrationReasonPRClosed      IntegrationReason = "pull_request_closed"
-	IntegrationReasonNoCoordinates IntegrationReason = "no_coordinates"
-	IntegrationReasonOpenFailed    IntegrationReason = "open_failed"
-	IntegrationReasonMergeRefused  IntegrationReason = "merge_refused"
-	IntegrationReasonChecksPending IntegrationReason = "checks_pending"
-	IntegrationReasonComputing     IntegrationReason = "computing"
-	IntegrationReasonConflict      IntegrationReason = "conflict"
+	IntegrationReasonNoToken        IntegrationReason = "no_token"
+	IntegrationReasonNoPullRequest  IntegrationReason = "no_pull_request"
+	IntegrationReasonPRClosed       IntegrationReason = "pull_request_closed"
+	IntegrationReasonNoCoordinates  IntegrationReason = "no_coordinates"
+	IntegrationReasonOpenFailed     IntegrationReason = "open_failed"
+	IntegrationReasonMergeRefused   IntegrationReason = "merge_refused"
+	IntegrationReasonChecksPending  IntegrationReason = "checks_pending"
+	IntegrationReasonComputing      IntegrationReason = "computing"
+	IntegrationReasonConflict       IntegrationReason = "conflict"
+	IntegrationReasonReleaseRefused IntegrationReason = "release_refused"
 )
 
 type IntegrationDeployStatus string
@@ -72,17 +76,25 @@ type TaskIntegration struct {
 	DeployStatus IntegrationDeployStatus `json:"deploy_status,omitempty"`
 	DeployURL    string                  `json:"deploy_url,omitempty"`
 	MergedAt     *time.Time              `json:"merged_at,omitempty"`
-	UpdatedAt    time.Time               `json:"updated_at"`
+	// PromoteTo is the column the card moves to once the change is on the
+	// integration branch and that deploy is green. Empty means nothing is held.
+	PromoteTo TaskColumn `json:"promote_to,omitempty"`
+	// ReleaseDeployStatus follows the deploy the release-branch merge started.
+	ReleaseDeployStatus IntegrationDeployStatus `json:"release_deploy_status,omitempty"`
+	ReleaseDeployURL    string                  `json:"release_deploy_url,omitempty"`
+	UpdatedAt           time.Time               `json:"updated_at"`
 }
 
-// ReadyForRelease reports whether a human may approve the task for the default
-// branch: its current head is on the integration branch and the deploy that
-// push started did not fail.
-func (t TaskIntegration) ReadyForRelease(currentHead string) bool {
-	if t.Status != IntegrationMerged || t.HeadSHA == "" || t.HeadSHA != currentHead {
-		return false
-	}
-	return t.DeployStatus == IntegrationDeploySuccess || t.DeployStatus == IntegrationDeployNone
+// IntegrationDeployDone reports whether the integration deploy has reached a
+// verdict the flow can act on: green, or no workflow at all.
+func (t TaskIntegration) IntegrationDeployDone() bool {
+	return t.Status == IntegrationMerged &&
+		(t.DeployStatus == IntegrationDeploySuccess || t.DeployStatus == IntegrationDeployNone)
+}
+
+// ReleaseDeployDone is IntegrationDeployDone for the release branch.
+func (t TaskIntegration) ReleaseDeployDone() bool {
+	return t.ReleaseDeployStatus == IntegrationDeploySuccess || t.ReleaseDeployStatus == IntegrationDeployNone
 }
 
 var (

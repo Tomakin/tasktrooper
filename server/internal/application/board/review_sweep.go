@@ -253,6 +253,12 @@ func (r *Runner) sweepReviewVerdict(
 	if !ok {
 		return nil
 	}
+	// The verdict is already in and the flow is carrying the task: asking the
+	// reviewer to "record where it goes" would have it repeat a move the flow
+	// holds on purpose.
+	if r.branchFlow != nil && r.branchFlow.IsHeld(ctx, job.Task.ID) {
+		return nil
+	}
 	// The agent may well have moved the task during its run; sweeping then would
 	// ask a finished reviewer to re-decide a decision already on the board.
 	reader, ok := r.taskUpdater.(taskColumnReader)

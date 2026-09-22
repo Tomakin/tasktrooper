@@ -20,16 +20,24 @@ const DEPLOY_VARIANT: Record<string, BadgeProps["variant"]> = {
 interface IntegrationStatusProps {
   branch: string;
   integration?: TaskIntegration;
+  /** The task's column, which says what the flow is waiting for. */
+  column?: string;
 }
 
 /** Where a human_uat task stands on the integration branch: merge and deploy. */
-export function IntegrationStatus({ branch, integration }: IntegrationStatusProps) {
+export function IntegrationStatus({ branch, integration, column }: IntegrationStatusProps) {
   const { t } = useI18n();
   const k = "boardArea.components.taskDetail.integration";
+  const releasing = column === "done";
 
   return (
     <div className="space-y-2 rounded-md border border-border/60 bg-background/60 p-3 text-sm">
-      <p className="font-medium">{t(`${k}.heading`, { branch })}</p>
+      <p className="font-medium">{t(releasing ? `${k}.releaseHeading` : `${k}.heading`, { branch })}</p>
+      {releasing && integration?.release_deploy_status && (
+        <Badge variant={DEPLOY_VARIANT[integration.release_deploy_status]}>
+          {t(`${k}.deploy.${integration.release_deploy_status}`)}
+        </Badge>
+      )}
       {!integration ? (
         <p className="text-muted-foreground">{t(`${k}.notStarted`, { branch })}</p>
       ) : (
@@ -78,12 +86,5 @@ export function IntegrationStatus({ branch, integration }: IntegrationStatusProp
         </>
       )}
     </div>
-  );
-}
-
-export function integrationReadyForRelease(integration?: TaskIntegration): boolean {
-  return (
-    integration?.status === "merged" &&
-    (integration.deploy_status === "success" || integration.deploy_status === "none")
   );
 }

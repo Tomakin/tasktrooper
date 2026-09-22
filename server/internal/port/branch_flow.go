@@ -14,6 +14,9 @@ type BranchFlowStore interface {
 	ListFlows(ctx context.Context) ([]domain.BranchFlow, error)
 	SetFlow(ctx context.Context, flow domain.BranchFlow) (domain.BranchFlow, error)
 	DeleteFlow(ctx context.Context, repositoryID uuid.UUID) error
+	// TaskRepository resolves a task's repository; used where only a task id is
+	// known (the git client's base-branch lookup).
+	TaskRepository(ctx context.Context, taskID uuid.UUID) (uuid.UUID, error)
 	// GetTaskIntegration returns domain.ErrTaskIntegrationNotFound when none.
 	GetTaskIntegration(ctx context.Context, taskID uuid.UUID) (domain.TaskIntegration, error)
 	SaveTaskIntegration(ctx context.Context, in domain.TaskIntegration) (domain.TaskIntegration, error)

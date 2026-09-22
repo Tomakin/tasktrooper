@@ -62,8 +62,8 @@ Placement rule: **atoms only in `components/ui/`**; molecules/organisms in the c
 | Piece | What it is |
 |---|---|
 | `projects/BranchFlowCard` | Organism on `ProjectSettingsPage`: the integration branch, save / turn off |
-| `board/IntegrationStatus` | Molecule: merge status, deploy status, PR and run links of a `human_uat` task |
-| `board/HumanUatDecision` | With a flow, polls `/integration` and approves through `api.releaseTask`, enabled only once `integrationReadyForRelease` |
+| `board/IntegrationStatus` | Molecule: merge status, deploy status, PR and run links; shows the release deploy in `done` |
+| `board/TaskIntegrationPanel` | Organism in `TaskDetailDrawer`: reads `/integration` (polling while the flow is acting, in `code_review` and `done`) and renders nothing without a flow |
 
 ## Task assignee
 

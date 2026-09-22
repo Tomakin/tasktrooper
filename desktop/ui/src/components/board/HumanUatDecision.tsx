@@ -1,15 +1,12 @@
 import { Eye } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { api, type BoardTask, type TaskIntegrationResponse } from "@/api";
-import { IntegrationStatus, integrationReadyForRelease } from "@/components/board/IntegrationStatus";
+import { api, type BoardTask } from "@/api";
 import { LocalPreviewPanel } from "@/components/board/LocalPreviewPanel";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useI18n } from "@/hooks/useI18n";
-
-const INTEGRATION_POLL_MS = 15000;
 
 interface HumanUatDecisionProps {
   task: BoardTask;
@@ -43,50 +40,7 @@ export function HumanUatDecision({ task, repositoryId, onUpdated }: HumanUatDeci
     setReason("");
   }, [task.id]);
 
-  // With the two-stage delivery the server merges the task into the
-  // integration branch on its own and watches that deploy; this polls its
-  // record so the panel and the release button follow without a reload.
-  const [flow, setFlow] = useState<TaskIntegrationResponse | null>(null);
-  const inUat = task.column === "human_uat";
-  useEffect(() => {
-    setFlow(null);
-    if (!inUat) return;
-    let cancelled = false;
-    const load = () =>
-      api
-        .getTaskIntegration(repositoryId, task.id)
-        .then((r) => !cancelled && setFlow(r))
-        .catch(() => undefined);
-    void load();
-    const timer = window.setInterval(() => void load(), INTEGRATION_POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [repositoryId, task.id, inUat]);
-
-  if (!inUat) return null;
-
-  const branchFlow = flow?.enabled ? flow : null;
-  const branch = branchFlow?.integration_branch ?? "";
-  const releaseReady = integrationReadyForRelease(branchFlow?.integration);
-
-  const release = async () => {
-    setSaving(true);
-    try {
-      const res = await api.releaseTask(repositoryId, task.id);
-      onUpdated();
-      if (res.merge_error) {
-        toast.warning(t("boardArea.components.taskDetail.integration.releaseMergeRefused", { reason: res.merge_error }));
-      } else {
-        toast.success(t("boardArea.components.taskDetail.integration.released"));
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("boardArea.components.taskDetail.updateFailed"));
-    } finally {
-      setSaving(false);
-    }
-  };
+  if (task.column !== "human_uat") return null;
 
   const approve = async () => {
     setSaving(true);
@@ -138,28 +92,14 @@ export function HumanUatDecision({ task, repositoryId, onUpdated }: HumanUatDeci
       </div>
       {!declining ? (
         <>
-          {branchFlow && <IntegrationStatus branch={branch} integration={branchFlow.integration} />}
           <div className="flex flex-wrap items-center gap-2">
-            {branchFlow ? (
-              <Button onClick={release} disabled={saving || !releaseReady}>
-                {saving
-                  ? t("boardArea.components.taskDetail.integration.releasing")
-                  : t("boardArea.components.taskDetail.integration.release")}
-              </Button>
-            ) : (
-              <Button onClick={approve} disabled={saving}>
-                {t("boardArea.components.taskDetail.humanUatApprove")}
-              </Button>
-            )}
+            <Button onClick={approve} disabled={saving}>
+              {t("boardArea.components.taskDetail.humanUatApprove")}
+            </Button>
             <Button variant="destructive" onClick={() => setDeclining(true)} disabled={saving}>
               {t("boardArea.components.taskDetail.humanUatDecline")}
             </Button>
           </div>
-          {branchFlow && !releaseReady && (
-            <p className="text-sm text-muted-foreground">
-              {t("boardArea.components.taskDetail.integration.notReady", { branch })}
-            </p>
-          )}
           <LocalPreviewPanel task={task} repositoryId={repositoryId} />
         </>
       ) : (

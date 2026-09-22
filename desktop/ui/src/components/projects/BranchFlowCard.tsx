@@ -24,6 +24,7 @@ export function BranchFlowCard({ repositoryId, className }: BranchFlowCardProps)
   const { t } = useI18n();
   const [settings, setSettings] = useState<BranchFlowSettings | null>(null);
   const [branch, setBranch] = useState("");
+  const [release, setRelease] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -35,19 +36,21 @@ export function BranchFlowCard({ repositoryId, className }: BranchFlowCardProps)
         if (cancelled) return;
         setSettings(s);
         setBranch(s.integration_branch);
+        setRelease(s.release_branch);
       })
-      .catch(() => !cancelled && setSettings({ enabled: false, integration_branch: "" }));
+      .catch(() => !cancelled && setSettings({ enabled: false, integration_branch: "", release_branch: "" }));
     return () => {
       cancelled = true;
     };
   }, [repositoryId]);
 
-  const save = async (next: string) => {
+  const save = async (next: string, nextRelease: string) => {
     setSaving(true);
     try {
-      const s = await api.setBranchFlow(repositoryId, next.trim());
+      const s = await api.setBranchFlow(repositoryId, next.trim(), nextRelease.trim());
       setSettings(s);
       setBranch(s.integration_branch);
+      setRelease(s.release_branch);
       toast.success(t("projectAdmin.projectSettings.branchFlow.saved"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("common.saveFailed"));
@@ -66,7 +69,12 @@ export function BranchFlowCard({ repositoryId, className }: BranchFlowCardProps)
         {settings && (
           <Badge variant={settings.enabled ? "success" : "outline"}>
             {settings.enabled
-              ? t("projectAdmin.projectSettings.branchFlow.enabled", { branch: settings.integration_branch })
+              ? t("projectAdmin.projectSettings.branchFlow.enabled", {
+                  branch: settings.integration_branch,
+                  release:
+                    settings.release_branch ||
+                    t("projectAdmin.projectSettings.branchFlow.releasePlaceholder"),
+                })
               : t("projectAdmin.projectSettings.branchFlow.disabled")}
           </Badge>
         )}
@@ -77,7 +85,7 @@ export function BranchFlowCard({ repositoryId, className }: BranchFlowCardProps)
       ) : (
         <div className="space-y-2">
           <Label htmlFor="branch-flow-integration">{t("projectAdmin.projectSettings.branchFlow.branchLabel")}</Label>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-end gap-2">
             <Input
               id="branch-flow-integration"
               className="max-w-xs font-mono"
@@ -86,16 +94,32 @@ export function BranchFlowCard({ repositoryId, className }: BranchFlowCardProps)
               onChange={(e) => setBranch(e.target.value)}
               disabled={saving}
             />
+            <div className="space-y-2">
+              <Label htmlFor="branch-flow-release">
+                {t("projectAdmin.projectSettings.branchFlow.releaseLabel")}
+              </Label>
+              <Input
+                id="branch-flow-release"
+                className="max-w-xs font-mono"
+                value={release}
+                placeholder={t("projectAdmin.projectSettings.branchFlow.releasePlaceholder")}
+                onChange={(e) => setRelease(e.target.value)}
+                disabled={saving}
+              />
+            </div>
             <Button
               size="sm"
-              onClick={() => void save(branch)}
-              disabled={saving || branch.trim() === settings.integration_branch}
+              onClick={() => void save(branch, release)}
+              disabled={
+                saving ||
+                (branch.trim() === settings.integration_branch && release.trim() === settings.release_branch)
+              }
             >
               <Save className="mr-2 h-4 w-4" />
               {t("common.save")}
             </Button>
             {settings.enabled && (
-              <Button size="sm" variant="outline" onClick={() => void save("")} disabled={saving}>
+              <Button size="sm" variant="outline" onClick={() => void save("", "")} disabled={saving}>
                 {t("projectAdmin.projectSettings.branchFlow.disableAction")}
               </Button>
             )}

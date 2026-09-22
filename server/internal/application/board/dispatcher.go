@@ -39,7 +39,14 @@ type Dispatcher struct {
 	workOrder    *WorkOrder
 	gatePolicy   PipelineGatePolicy
 	reviewLoop   *ReviewLoopGuard
+	branchFlow   BranchFlowChecker
 }
+
+// SetBranchFlow wires the two-stage delivery. With it on for a repository the
+// done column is the flow's, not an agent's: the sweeper merges and watches
+// the deploy, so waking QA there would spend a CLI session on a merge that is
+// already happening and on a refusal it cannot act on.
+func (d *Dispatcher) SetBranchFlow(c BranchFlowChecker) { d.branchFlow = c }
 
 type PipelineGatePolicy interface {
 	RequirePipelineForReview(ctx context.Context, repositoryID uuid.UUID) bool
@@ -136,6 +143,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, input DispatchInput) error {
 	}
 
 	mergeWake := doneMergeWake(input)
+	if mergeWake && d.branchFlow != nil && d.branchFlow.Enabled(ctx, input.RepositoryID) {
+		mergeWake = false
+	}
 	watchWake := deployWatchWake(input)
 	if isDispatchSuspendedTask(input.Task) && !mergeWake && !watchWake {
 		return nil

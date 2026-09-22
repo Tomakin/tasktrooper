@@ -1732,6 +1732,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					},
 				})
 				repositorySvc.SetBranchFlow(branchFlowSvc)
+				if boardDispatcher != nil {
+					boardDispatcher.SetBranchFlow(branchFlowSvc)
+				}
 				// One resolver answers every "what is this checkout based on?"
 				// question in the git adapter: the PR base, the rebase target
 				// and the drift check.

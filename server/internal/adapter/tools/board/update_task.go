@@ -82,7 +82,7 @@ func (t *updateTaskTool) Definition() domain.ToolDefinition {
 					"acceptance_criteria": map[string]interface{}{
 						"type":        "array",
 						"items":       map[string]interface{}{"type": "string"},
-						"description": "Replaces the task's acceptance-criteria checklist with this list, one observable Given/When/Then per item. Send the FULL list — anything omitted is deleted and completion state is reset. Omit the argument entirely to leave criteria untouched.",
+						"description": "Replaces the task's acceptance-criteria checklist with this list, one observable scenario per item: the precondition, the action, and the expected result, written entirely in the language you answer in (the Given/When/Then scaffolding in that language's own words, never mixed with English). Send the FULL list — anything omitted is deleted and completion state is reset. Omit the argument entirely to leave criteria untouched.",
 					},
 					"column": map[string]interface{}{
 						"type": "string",

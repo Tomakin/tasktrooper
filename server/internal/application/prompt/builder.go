@@ -312,7 +312,17 @@ func LocalToolGuidance() string {
 }
 
 func LanguageInstruction(lang string) string {
-	return fmt.Sprintf("Respond in %s unless the user explicitly requests another language.", LocaleDisplayName(lang))
+	name := LocaleDisplayName(lang)
+	// Everything a person reads is named explicitly because the board's own
+	// scaffolding is written in English: an agent told only to "respond in X"
+	// answers in X and then files acceptance criteria as "Given … when … then"
+	// with X inside them. The history stays English on purpose — a repository
+	// is read by more people than this board.
+	return fmt.Sprintf("Respond in %s unless the user explicitly requests another language. "+
+		"Everything you write for a person is in %s too — card comments, task titles and descriptions, "+
+		"acceptance criteria (their precondition/action/expected-result wording included, in %s's own words, "+
+		"never mixed with English). Git commit messages, branch names and pull-request titles stay in English.",
+		name, name, name)
 }
 
 func SubtaskWorkspaceNote(dir string) string {

@@ -112,7 +112,7 @@ func (t *createTaskTool) Definition() domain.ToolDefinition {
 					"acceptance_criteria": map[string]interface{}{
 						"type":        "array",
 						"items":       map[string]interface{}{"type": "string"},
-						"description": "Acceptance criteria, one observable Given/When/Then per array item, in order. This is the ONLY place criteria belong — they become the checklist QA executes and pm_uat verifies. Writing them into description instead leaves the task with an empty checklist.",
+						"description": "Acceptance criteria, one observable scenario per array item, in order: the precondition, the action, and the expected result. Write the whole item in the language you answer in — the Given/When/Then scaffolding included, in that language's own words, never mixed with English. This is the ONLY place criteria belong — they become the checklist QA executes and the acceptance stage verifies. Writing them into description instead leaves the task with an empty checklist.",
 					},
 					"column": map[string]interface{}{
 						"type":        "string",

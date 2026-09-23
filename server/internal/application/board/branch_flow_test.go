@@ -58,6 +58,9 @@ func (f flowStub) HoldReviewPromotion(context.Context, domain.BoardTask, domain.
 	return f.held
 }
 func (f flowStub) IsHeld(context.Context, uuid.UUID) bool { return f.held }
+func (f flowStub) RedirectMove(_ context.Context, _ uuid.UUID, to domain.TaskColumn) (domain.TaskColumn, bool) {
+	return to, false
+}
 
 // done belongs to the flow when it is on: the sweeper merges and watches the
 // deploy, so dispatching QA there would spend a session on work already in

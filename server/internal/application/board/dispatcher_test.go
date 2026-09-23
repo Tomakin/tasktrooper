@@ -1273,6 +1273,9 @@ func (flowRepo) HoldReviewPromotion(context.Context, domain.BoardTask, domain.Ta
 	return false
 }
 func (flowRepo) IsHeld(context.Context, uuid.UUID) bool { return false }
+func (flowRepo) RedirectMove(_ context.Context, _ uuid.UUID, to domain.TaskColumn) (domain.TaskColumn, bool) {
+	return to, false
+}
 
 func (s *DispatcherSuite) TestFlowStatusCommentsDoNotWakeTheColumnsAgent() {
 	reviewer := uuid.New()

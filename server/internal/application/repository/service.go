@@ -1938,6 +1938,15 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	}
 	prevColumn := task.Column
 	prevAssignee := task.AssigneeAgentID
+	// Two-stage delivery routes QA's hand-off past pm_uat: the human testing on
+	// the integration environment is the acceptance stage there.
+	if req.Column != nil && s.branchFlow != nil {
+		if redirected, changed := s.branchFlow.RedirectMove(ctx, repositoryID, *req.Column); changed {
+			log.Info().Str("task_id", taskID.String()).Str("from", string(*req.Column)).
+				Str("to", string(redirected)).Msg("branch flow: move redirected")
+			req.Column = &redirected
+		}
+	}
 	if req.Title != nil {
 		task.Title = *req.Title
 	}

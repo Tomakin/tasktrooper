@@ -199,6 +199,10 @@ type BranchFlowChecker interface {
 	// IsHeld reports that the flow already owns this task's next move, so the
 	// runner must not nudge its reviewer to make it.
 	IsHeld(ctx context.Context, taskID uuid.UUID) bool
+	// RedirectMove rewrites a move the flow routes differently. There is no PM
+	// UAT stage in it: the human who tests on the integration environment is
+	// the acceptance, so a move into pm_uat is a move into human_uat.
+	RedirectMove(ctx context.Context, repositoryID uuid.UUID, to domain.TaskColumn) (domain.TaskColumn, bool)
 }
 
 // SetBranchFlow wires the two-stage delivery lookup. Optional: nil is the

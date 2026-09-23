@@ -152,6 +152,20 @@ func (s *Service) SetFlow(ctx context.Context, repositoryID uuid.UUID, integrati
 	})
 }
 
+// RedirectMove sends a move into pm_uat to human_uat instead. The agents'
+// role prompts name pm_uat as what follows QA; on a repository running this
+// flow that column is not part of the route, and a card left there waits for a
+// stage that will never come.
+func (s *Service) RedirectMove(ctx context.Context, repositoryID uuid.UUID, to domain.TaskColumn) (domain.TaskColumn, bool) {
+	if s == nil || s.flows == nil || to != domain.TaskColumnPMUAT {
+		return to, false
+	}
+	if _, err := s.flows.GetFlow(ctx, repositoryID); err != nil {
+		return to, false
+	}
+	return domain.TaskColumnHumanUAT, true
+}
+
 // IsHeld reports whether this task's next move belongs to the flow.
 func (s *Service) IsHeld(ctx context.Context, taskID uuid.UUID) bool {
 	if s == nil || s.flows == nil {

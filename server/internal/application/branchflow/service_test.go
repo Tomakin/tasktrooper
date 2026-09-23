@@ -283,6 +283,27 @@ func TestReviewPassIsHeldUntilTheIntegrationDeployIsGreen(t *testing.T) {
 	}
 }
 
+func TestPMUATIsRoutedToHumanUAT(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	to, changed := f.svc.RedirectMove(ctx, f.repoID, domain.TaskColumnPMUAT)
+	if !changed || to != domain.TaskColumnHumanUAT {
+		t.Fatalf("pm_uat → %s (changed=%v)", to, changed)
+	}
+	for _, col := range []domain.TaskColumn{
+		domain.TaskColumnReadyForQA, domain.TaskColumnHumanUAT, domain.TaskColumnDone, domain.TaskColumnNeedRevision,
+	} {
+		if to, changed := f.svc.RedirectMove(ctx, f.repoID, col); changed || to != col {
+			t.Errorf("%s was rewritten to %s", col, to)
+		}
+	}
+	delete(f.flows.flows, f.repoID)
+	if to, changed := f.svc.RedirectMove(ctx, f.repoID, domain.TaskColumnPMUAT); changed || to != domain.TaskColumnPMUAT {
+		t.Errorf("without a flow pm_uat stays: %s (changed=%v)", to, changed)
+	}
+}
+
 func TestSystemMovesAreNotHeld(t *testing.T) {
 	f := newFixture(t)
 	if f.svc.HoldReviewPromotion(context.Background(), f.board.tasks[f.taskID],

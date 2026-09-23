@@ -1,8 +1,11 @@
 package board
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
@@ -42,5 +45,38 @@ func TestRunInstructionReadsTheJobsFlow(t *testing.T) {
 	job := RunJob{Task: domain.BoardTask{Column: domain.TaskColumnInQA}, BranchFlow: true}
 	if !strings.Contains(runInstruction(job), "human_uat") {
 		t.Error("runInstruction ignores the job's branch flow")
+	}
+}
+
+type flowStub struct {
+	enabled bool
+	held    bool
+}
+
+func (f flowStub) Enabled(context.Context, uuid.UUID) bool { return f.enabled }
+func (f flowStub) HoldReviewPromotion(context.Context, domain.BoardTask, domain.TaskColumn, domain.TaskColumn, domain.TaskActor) bool {
+	return f.held
+}
+func (f flowStub) IsHeld(context.Context, uuid.UUID) bool { return f.held }
+
+// done belongs to the flow when it is on: the sweeper merges and watches the
+// deploy, so dispatching QA there would spend a session on work already in
+// hand and on a refusal it cannot act on.
+func TestDoneMergeWakeIsSkippedForFlowRepositories(t *testing.T) {
+	input := DispatchInput{
+		RepositoryID: uuid.New(),
+		EventType:    domain.BoardEventTaskMoved,
+		Task: domain.BoardTask{
+			ID: uuid.New(), Column: domain.TaskColumnDone, TaskType: domain.TaskTypeTask,
+			PRURL: "https://github.com/acme/app/pull/1",
+		},
+	}
+	if !doneMergeWake(input) {
+		t.Fatal("an unmerged task in done wakes QA without the flow")
+	}
+	d := &Dispatcher{}
+	d.SetBranchFlow(flowStub{enabled: true})
+	if d.branchFlow == nil || !d.branchFlow.Enabled(context.Background(), input.RepositoryID) {
+		t.Fatal("the checker was not wired")
 	}
 }

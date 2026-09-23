@@ -229,21 +229,34 @@ watch keys off rather than the default branch.
 ## Two-stage delivery (migration 144)
 
 A repository with an integration branch (e.g. `development`) delivers in two
-stages. A task that passes QA goes to `human_uat` (no `pm_uat` in this flow;
-with `require_review_chain` the UAT stage is `human_uat`). A sweeper
-(`application/branchflow`, every 30 s) opens a second pull request from the
-task branch into the integration branch, merges it with a **merge commit**
-(branch kept), and watches the push's workflow runs — it never dispatches one.
-A conflict (`dirty`) comments and moves the task to `need_revision`. New
-commits on the branch are merged again.
+stages, both run by a sweeper (`application/branchflow`, every 30 s) that
+watches deploys and never dispatches one.
+
+1. **Code review → QA.** The move `code_review → ready_for_qa` is held
+   (`HoldReviewPromotion`, the same interception point as the human-review
+   gate): the sweeper opens a second pull request from the task branch into the
+   integration branch, merges it with a **merge commit** (branch kept), watches
+   the push's workflow runs and only then moves the card to `ready_for_qa`. A
+   conflict (`dirty`) comments and sends the task to `need_revision`; a failed
+   deploy leaves it in `code_review` with a comment. New commits are merged
+   again on the next pass.
+2. **Done → released.** In `done` the sweeper runs the board's gated merge of
+   the task's own pull request into the release branch, then watches that
+   push's runs and moves the card to `released`. A refused merge is commented
+   once; a failed deploy leaves the task in `done`.
+
+There is no `pm_uat` in this flow: QA hands the task to `human_uat`, and with
+`require_review_chain` that column is the UAT stage. `require_release_deploy`
+must stay off — the board triggers no deploy of its own, so it has no pipeline
+row to prove one.
 
 | Route | |
 |---|---|
-| `GET/PUT /v1/repositories/{id}/branch-flow` | `{enabled, integration_branch}`; PUT with `""` turns it off |
-| `GET /v1/repositories/{id}/tasks/{taskId}/integration` | `{enabled, integration_branch, integration?}` — status `waiting·merged·conflict·failed`, deploy_status `pending·success·failure·none` |
-| `POST /v1/repositories/{id}/tasks/{taskId}/release` | The human's "passed": 409 `release_not_ready` unless the current head is merged and its deploy did not fail; otherwise moves the task to `done` (every gate applies) and runs the gated squash merge into the default branch. A refused merge returns 200 with `merge_error` and leaves the task in `done`. |
+| `GET/PUT /v1/repositories/{id}/branch-flow` | `{enabled, integration_branch, release_branch}`; an empty `release_branch` means the repository's GitHub default branch, and an empty `integration_branch` turns the flow off |
+| `GET /v1/repositories/{id}/tasks/{taskId}/integration` | `{enabled, integration_branch, integration?}` — status `waiting·merged·conflict·failed`, `deploy_status`/`release_deploy_status` `pending·success·failure·none`, `promote_to` while a review is held |
 
-The release branch is the repository's GitHub default branch.
+The release branch is also what a task branch is cut from and what its own pull
+request targets (`git.Client.SetBaseBranchResolver`).
 
 ## Deploy targets
 

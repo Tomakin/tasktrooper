@@ -706,8 +706,10 @@ func TestEnsurePullRequestWithoutTokenTitlesFromTheLastCommitSubject(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(argv), "pr create --fill --title feat: add the widget endpoint\n") {
-		t.Fatalf("gh was not called with an explicit --title from the last commit subject:\n%s", argv)
+	// The base is explicit on this path too: with a release branch configured,
+	// gh's own default (the repository's default branch) would be the wrong one.
+	if !strings.Contains(string(argv), "pr create --fill --title feat: add the widget endpoint --base main\n") {
+		t.Fatalf("gh was not called with an explicit --title from the last commit subject and a base:\n%s", argv)
 	}
 }
 

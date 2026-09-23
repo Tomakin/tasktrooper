@@ -90,7 +90,7 @@ func TestWakeDependentsOfDispatchesTheClearDependentAndLeavesTheStillBlockedOneP
 		stillBlockedDependent.ID: {{ID: otherBlockerID, Key: "T-C", Column: domain.TaskColumnInProgress}},
 	}}
 	resources := &fakeWakeResourceLister{byID: map[uuid.UUID]domain.BoardTask{
-		clearDependent.ID:         clearDependent,
+		clearDependent.ID:        clearDependent,
 		stillBlockedDependent.ID: stillBlockedDependent,
 	}}
 

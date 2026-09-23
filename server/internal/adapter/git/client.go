@@ -33,12 +33,33 @@ type Client struct {
 	identityToken string
 	identity      githubapi.Identity
 	identityAt    time.Time
+
+	// baseBranch answers "what does this checkout branch off, and where does
+	// its pull request go?" for one workspace. Nil, or an empty answer, means
+	// origin's default branch, which is what every caller assumed before a
+	// release branch could be configured.
+	baseBranch func(ctx context.Context, workspacePath string) string
 }
 
 const identityTTL = time.Hour
 
 func NewClient() *Client {
 	return &Client{}
+}
+
+// SetBaseBranchResolver wires the per-repository release branch.
+func (c *Client) SetBaseBranchResolver(fn func(ctx context.Context, workspacePath string) string) {
+	c.baseBranch = fn
+}
+
+// targetBranch is the branch a task's work is based on and merged back into.
+func (c *Client) targetBranch(ctx context.Context, workspacePath string) string {
+	if c.baseBranch != nil {
+		if b := strings.TrimSpace(c.baseBranch(ctx, workspacePath)); b != "" {
+			return b
+		}
+	}
+	return c.DefaultBranch(ctx, workspacePath)
 }
 
 // SetTokenSource, gh CLI yerine token tabanlı GitHub erişimini etkinleştirir.
@@ -606,9 +627,9 @@ func (c *Client) rebaseTarget(ctx context.Context, workspacePath, branch string,
 		return "origin/" + branch
 	}
 	// No branch on origin: either it was never pushed, or it was merged and
-	// deleted. Both make the default branch the right base — in the merged case
+	// deleted. Both make the base branch the right start — in the merged case
 	// the rebase simply drops the commits origin already has.
-	def := c.DefaultBranch(ctx, workspacePath)
+	def := c.targetBranch(ctx, workspacePath)
 	if def == "" || !c.refExists(ctx, workspacePath, "refs/remotes/origin/"+def) {
 		return ""
 	}
@@ -952,6 +973,9 @@ func (c *Client) EnsurePullRequest(ctx context.Context, workspacePath string) (s
 	if title != "" {
 		createArgs = append(createArgs, "--title", title)
 	}
+	if base := c.targetBranch(ctx, workspacePath); base != "" {
+		createArgs = append(createArgs, "--base", base)
+	}
 	if out, err := c.run(ctx, workspacePath, "gh", createArgs...); err != nil {
 		return "", fmt.Errorf("gh pr create: %w (%s)", err, strings.TrimSpace(out))
 	}
@@ -1029,19 +1053,23 @@ func (c *Client) ensurePullRequestAPI(ctx context.Context, workspacePath, token 
 	}
 	branch := strings.TrimSpace(branchOut)
 
-	if url, err := githubapi.FindOpenPR(ctx, token, owner, repoName, owner, branch); err == nil && url != "" {
-		return url, nil
-	}
-
 	repo, err := githubapi.GetRepo(ctx, token, owner, repoName)
 	if err != nil {
 		return "", fmt.Errorf("github repo get: %w", err)
 	}
+	base := repo.DefaultBranch
+	if configured := c.targetBranch(ctx, workspacePath); configured != "" {
+		base = configured
+	}
+	if url, err := githubapi.FindOpenPR(ctx, token, owner, repoName, owner, branch, base); err == nil && url != "" {
+		return url, nil
+	}
+
 	title := branch
 	if out, err := c.run(ctx, workspacePath, "git", "log", "-1", "--pretty=%s"); err == nil && strings.TrimSpace(out) != "" {
 		title = strings.TrimSpace(out)
 	}
-	url, err := githubapi.CreatePullRequest(ctx, token, owner, repoName, branch, repo.DefaultBranch, title)
+	url, err := githubapi.CreatePullRequest(ctx, token, owner, repoName, branch, base, title)
 	if err != nil {
 		return "", fmt.Errorf("github pr create: %w", err)
 	}

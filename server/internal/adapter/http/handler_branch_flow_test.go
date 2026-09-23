@@ -11,14 +11,12 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
-	"github.com/makifbaysal/tasktrooper/server/internal/application/branchflow"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
 type fakeBranchFlow struct {
-	flow       *domain.BranchFlow
-	rec        *domain.TaskIntegration
-	releaseErr error
+	flow *domain.BranchFlow
+	rec  *domain.TaskIntegration
 }
 
 func (f *fakeBranchFlow) Flow(context.Context, uuid.UUID) (domain.BranchFlow, error) {
@@ -27,15 +25,15 @@ func (f *fakeBranchFlow) Flow(context.Context, uuid.UUID) (domain.BranchFlow, er
 	}
 	return *f.flow, nil
 }
-func (f *fakeBranchFlow) SetFlow(_ context.Context, id uuid.UUID, branch string) (domain.BranchFlow, error) {
+func (f *fakeBranchFlow) SetFlow(_ context.Context, id uuid.UUID, branch, release string) (domain.BranchFlow, error) {
 	if branch == "" {
 		f.flow = nil
 		return domain.BranchFlow{}, nil
 	}
-	if strings.Contains(branch, " ") {
+	if strings.Contains(branch, " ") || strings.Contains(release, " ") {
 		return domain.BranchFlow{}, domain.ErrReleaseNotReady
 	}
-	f.flow = &domain.BranchFlow{RepositoryID: id, IntegrationBranch: branch}
+	f.flow = &domain.BranchFlow{RepositoryID: id, IntegrationBranch: branch, ReleaseBranch: release}
 	return *f.flow, nil
 }
 func (f *fakeBranchFlow) TaskIntegration(context.Context, uuid.UUID, uuid.UUID) (domain.TaskIntegration, error) {
@@ -43,15 +41,6 @@ func (f *fakeBranchFlow) TaskIntegration(context.Context, uuid.UUID, uuid.UUID) 
 		return domain.TaskIntegration{}, domain.ErrTaskIntegrationNotFound
 	}
 	return *f.rec, nil
-}
-func (f *fakeBranchFlow) Release(context.Context, uuid.UUID, uuid.UUID) (branchflow.ReleaseResult, error) {
-	if f.flow == nil {
-		return branchflow.ReleaseResult{}, domain.ErrBranchFlowNotFound
-	}
-	if f.releaseErr != nil {
-		return branchflow.ReleaseResult{}, f.releaseErr
-	}
-	return branchflow.ReleaseResult{Task: domain.BoardTask{Column: domain.TaskColumnDone}}, nil
 }
 
 func branchFlowApp(f *fakeBranchFlow) *fiber.App {
@@ -83,12 +72,15 @@ func TestBranchFlowSettingsRoundTrip(t *testing.T) {
 	if code, body := call(t, app, "GET", base, ""); code != 200 || body["enabled"] != false {
 		t.Fatalf("off: %d %v", code, body)
 	}
-	if code, body := call(t, app, "PUT", base, `{"integration_branch":"development"}`); code != 200 ||
-		body["enabled"] != true || body["integration_branch"] != "development" {
+	if code, body := call(t, app, "PUT", base, `{"integration_branch":"development","release_branch":"master"}`); code != 200 ||
+		body["enabled"] != true || body["integration_branch"] != "development" || body["release_branch"] != "master" {
 		t.Fatalf("on: %d %v", code, body)
 	}
 	if code, _ := call(t, app, "PUT", base, `{"integration_branch":"bad name"}`); code != 400 {
 		t.Fatalf("invalid branch: %d", code)
+	}
+	if code, _ := call(t, app, "PUT", base, `{"integration_branch":"development","release_branch":"bad name"}`); code != 400 {
+		t.Fatalf("invalid release branch: %d", code)
 	}
 	if code, body := call(t, app, "PUT", base, `{"integration_branch":""}`); code != 200 || body["enabled"] != false {
 		t.Fatalf("off again: %d %v", code, body)
@@ -106,9 +98,6 @@ func TestTaskIntegrationAndRelease(t *testing.T) {
 	if _, body := call(t, app, "GET", base+"/integration", ""); body["enabled"] != false {
 		t.Fatalf("no flow: %v", body)
 	}
-	if code, _ := call(t, app, "POST", base+"/release", ""); code != 404 {
-		t.Fatalf("release without a flow: %d", code)
-	}
 
 	f.flow = &domain.BranchFlow{IntegrationBranch: "development"}
 	if _, body := call(t, app, "GET", base+"/integration", ""); body["enabled"] != true || body["integration"] != nil {
@@ -121,14 +110,7 @@ func TestTaskIntegrationAndRelease(t *testing.T) {
 		t.Fatalf("record: %v", body)
 	}
 
-	f.releaseErr = domain.ErrReleaseNotReady
-	if code, body := call(t, app, "POST", base+"/release", ""); code != 409 {
-		t.Fatalf("not ready: %d %v", code, body)
-	}
-	f.releaseErr = nil
-	code, body := call(t, app, "POST", base+"/release", "")
-	task, _ := body["task"].(map[string]any)
-	if code != 200 || task["column"] != "done" {
-		t.Fatalf("release: %d %v", code, body)
+	if code, _ := call(t, app, "POST", base+"/release", ""); code != 404 {
+		t.Fatalf("the release endpoint is gone: %d", code)
 	}
 }

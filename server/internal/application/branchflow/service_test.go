@@ -14,8 +14,9 @@ import (
 )
 
 type memFlows struct {
-	flows map[uuid.UUID]domain.BranchFlow
-	recs  map[uuid.UUID]domain.TaskIntegration
+	flows     map[uuid.UUID]domain.BranchFlow
+	recs      map[uuid.UUID]domain.TaskIntegration
+	taskRepos map[uuid.UUID]uuid.UUID
 }
 
 func (m *memFlows) GetFlow(_ context.Context, id uuid.UUID) (domain.BranchFlow, error) {
@@ -37,6 +38,12 @@ func (m *memFlows) SetFlow(_ context.Context, f domain.BranchFlow) (domain.Branc
 	return f, nil
 }
 func (m *memFlows) DeleteFlow(_ context.Context, id uuid.UUID) error { delete(m.flows, id); return nil }
+func (m *memFlows) TaskRepository(_ context.Context, taskID uuid.UUID) (uuid.UUID, error) {
+	if repo, ok := m.taskRepos[taskID]; ok {
+		return repo, nil
+	}
+	return uuid.Nil, domain.ErrTaskIntegrationNotFound
+}
 func (m *memFlows) GetTaskIntegration(_ context.Context, id uuid.UUID) (domain.TaskIntegration, error) {
 	r, ok := m.recs[id]
 	if !ok {
@@ -102,13 +109,14 @@ func (m *fakeMerger) MergeTaskPullRequest(context.Context, uuid.UUID, uuid.UUID)
 
 // fakeGitHub keeps the task PR (#1, into main) and the integration PRs.
 type fakeGitHub struct {
-	head       string
-	nextState  string
-	intPRs     map[int]port.PullRequest
-	merged     map[int]string
-	runs       []port.ActionsRun
-	created    int
-	mergeCalls int
+	head          string
+	nextState     string
+	intPRs        map[int]port.PullRequest
+	merged        map[int]string
+	runs          []port.ActionsRun
+	created       int
+	mergeCalls    int
+	lastRunBranch string
 }
 
 func newFakeGitHub() *fakeGitHub {
@@ -153,6 +161,7 @@ func (g *fakeGitHub) MergeWithMergeCommit(_ context.Context, _, _, _ string, n i
 	return "m-" + sha, nil
 }
 func (g *fakeGitHub) ListPushRuns(_ context.Context, _, _, _, branch, sha string) ([]port.ActionsRun, error) {
+	g.lastRunBranch = branch
 	return g.runs, nil
 }
 
@@ -170,7 +179,11 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{
-		flows:  &memFlows{flows: map[uuid.UUID]domain.BranchFlow{}, recs: map[uuid.UUID]domain.TaskIntegration{}},
+		flows: &memFlows{
+			flows:     map[uuid.UUID]domain.BranchFlow{},
+			recs:      map[uuid.UUID]domain.TaskIntegration{},
+			taskRepos: map[uuid.UUID]uuid.UUID{},
+		},
 		board:  &fakeBoard{tasks: map[uuid.UUID]domain.BoardTask{}},
 		gh:     newFakeGitHub(),
 		merger: &fakeMerger{},
@@ -178,13 +191,17 @@ func newFixture(t *testing.T) *fixture {
 		taskID: uuid.New(),
 		now:    time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC),
 	}
-	f.flows.flows[f.repoID] = domain.BranchFlow{RepositoryID: f.repoID, IntegrationBranch: "development"}
+	f.flows.flows[f.repoID] = domain.BranchFlow{
+		RepositoryID: f.repoID, IntegrationBranch: "development", ReleaseBranch: "master",
+	}
+	f.flows.taskRepos[f.taskID] = f.repoID
 	f.board.tasks[f.taskID] = domain.BoardTask{ID: f.taskID, RepositoryID: f.repoID, Key: "A-1", Title: "Thing",
-		Column: domain.TaskColumnHumanUAT, PRNumber: 1, PRURL: "https://github.com/acme/app/pull/1"}
+		Column: domain.TaskColumnCodeReview, PRNumber: 1, PRURL: "https://github.com/acme/app/pull/1"}
 	f.svc = New(Deps{
 		Flows: f.flows, Tasks: f.board, Board: f.board, Merger: f.merger, PRs: f.gh, GitHub: f.gh,
-		Tokens:      func(context.Context) (string, error) { return "tok", nil },
-		Coordinates: func(context.Context, uuid.UUID) (string, string, error) { return "acme", "app", nil },
+		Tokens:        func(context.Context) (string, error) { return "tok", nil },
+		Coordinates:   func(context.Context, uuid.UUID) (string, string, error) { return "acme", "app", nil },
+		DefaultBranch: func(context.Context, uuid.UUID) string { return "main" },
 	})
 	f.svc.SetClock(func() time.Time { return f.now })
 	return f
@@ -200,68 +217,190 @@ func (f *fixture) sweep(t *testing.T) domain.TaskIntegration {
 
 func (f *fixture) column() domain.TaskColumn { return f.board.tasks[f.taskID].Column }
 
-func TestFullCycleMergeDeployRelease(t *testing.T) {
+// moveTo is a board move made outside the flow (an agent, a human).
+func (f *fixture) moveTo(t *testing.T, column domain.TaskColumn) {
+	t.Helper()
+	task := f.board.tasks[f.taskID]
+	task.Column = column
+	f.board.tasks[f.taskID] = task
+}
+
+// hold is what repository.Service does when a reviewer passes the task.
+func (f *fixture) hold(t *testing.T) bool {
+	t.Helper()
+	return f.svc.HoldReviewPromotion(context.Background(), f.board.tasks[f.taskID],
+		domain.TaskColumnCodeReview, domain.TaskColumnReadyForQA, domain.TaskActorAgent)
+}
+
+func TestReviewPassIsHeldUntilTheIntegrationDeployIsGreen(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
+
+	if !f.hold(t) {
+		t.Fatal("the flow must hold a passing review")
+	}
+	if f.column() != domain.TaskColumnCodeReview {
+		t.Fatalf("the card must not move yet: %s", f.column())
+	}
 
 	rec := f.sweep(t)
-	if rec.Status != domain.IntegrationWaiting || rec.Reason != domain.IntegrationReasonComputing || f.gh.created != 1 || f.gh.mergeCalls != 0 {
+	if rec.Status != domain.IntegrationWaiting || f.gh.created != 1 || f.gh.mergeCalls != 0 {
 		t.Fatalf("first pass opens the PR and waits for mergeability: %+v created=%d", rec, f.gh.created)
 	}
-	if _, err := f.svc.Release(ctx, f.repoID, f.taskID); !errors.Is(err, domain.ErrReleaseNotReady) {
-		t.Fatalf("release before the merge: %v", err)
+	if f.column() != domain.TaskColumnCodeReview {
+		t.Fatalf("still held: %s", f.column())
 	}
 
 	rec = f.sweep(t)
-	if rec.Status != domain.IntegrationMerged || rec.MergeSHA != "m-h1" || rec.DeployStatus != domain.IntegrationDeployPending || rec.Reason != "" {
-		t.Fatalf("second pass merges: %+v", rec)
+	if rec.Status != domain.IntegrationMerged || rec.MergeSHA != "m-h1" || rec.DeployStatus != domain.IntegrationDeployPending {
+		t.Fatalf("second pass merges into development: %+v", rec)
 	}
-	if f.gh.created != 1 {
-		t.Fatal("the open PR must be reused, not duplicated")
+	if f.column() != domain.TaskColumnCodeReview {
+		t.Fatalf("a running deploy keeps the card in review: %s", f.column())
 	}
 
 	f.gh.runs = []port.ActionsRun{{Status: "in_progress", HTMLURL: "run1"}}
-	if rec = f.sweep(t); rec.DeployStatus != domain.IntegrationDeployPending {
-		t.Fatalf("running deploy: %+v", rec)
-	}
-	if _, err := f.svc.Release(ctx, f.repoID, f.taskID); !errors.Is(err, domain.ErrReleaseNotReady) {
-		t.Fatalf("release during the deploy: %v", err)
+	f.sweep(t)
+	if f.column() != domain.TaskColumnCodeReview {
+		t.Fatalf("still deploying: %s", f.column())
 	}
 
 	f.gh.runs = []port.ActionsRun{{Status: "completed", Conclusion: "success", HTMLURL: "run1"}}
-	if rec = f.sweep(t); rec.DeployStatus != domain.IntegrationDeploySuccess || rec.DeployURL != "run1" {
-		t.Fatalf("finished deploy: %+v", rec)
+	rec = f.sweep(t)
+	if f.column() != domain.TaskColumnReadyForQA {
+		t.Fatalf("a green deploy hands the task to QA: %s", f.column())
+	}
+	if rec.PromoteTo != "" {
+		t.Fatalf("the hold must be cleared: %+v", rec)
 	}
 	if f.gh.mergeCalls != 1 {
 		t.Fatal("a merged head is never merged again")
 	}
-
-	res, err := f.svc.Release(ctx, f.repoID, f.taskID)
-	if err != nil || res.Merge == nil || res.Merge.MergeCommitSHA != "mainsha" {
-		t.Fatalf("release: %+v %v", res, err)
-	}
-	if f.column() != domain.TaskColumnDone || f.merger.calls != 1 {
-		t.Fatalf("column=%s merges=%d", f.column(), f.merger.calls)
-	}
-
 	joined := strings.Join(f.board.comments, "\n")
 	for _, want := range []string{"Merged into `development`", "deploy for m-h1 succeeded"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("comments lack %q:\n%s", want, joined)
 		}
 	}
-	if len(f.board.comments) != 2 {
-		t.Errorf("one comment per change, got %d:\n%s", len(f.board.comments), joined)
+}
+
+func TestSystemMovesAreNotHeld(t *testing.T) {
+	f := newFixture(t)
+	if f.svc.HoldReviewPromotion(context.Background(), f.board.tasks[f.taskID],
+		domain.TaskColumnCodeReview, domain.TaskColumnReadyForQA, domain.TaskActorSystem) {
+		t.Fatal("the flow's own move must not be held")
+	}
+	for _, move := range [][2]domain.TaskColumn{
+		{domain.TaskColumnCodeReview, domain.TaskColumnNeedRevision},
+		{domain.TaskColumnInQA, domain.TaskColumnHumanUAT},
+		{domain.TaskColumnTodo, domain.TaskColumnInProgress},
+	} {
+		if f.svc.HoldReviewPromotion(context.Background(), f.board.tasks[f.taskID], move[0], move[1], domain.TaskActorAgent) {
+			t.Errorf("%s → %s must not be held", move[0], move[1])
+		}
+	}
+	delete(f.flows.flows, f.repoID)
+	if f.hold(t) {
+		t.Error("a repository without a flow is never held")
+	}
+}
+
+func TestDoneMergesToTheReleaseBranchAndReleases(t *testing.T) {
+	f := newFixture(t)
+	f.moveTo(t, domain.TaskColumnDone)
+
+	f.sweep(t)
+	if f.merger.calls != 1 {
+		t.Fatalf("done must merge the task's pull request: %d", f.merger.calls)
+	}
+	if f.column() != domain.TaskColumnDone {
+		t.Fatalf("the card waits for the deploy: %s", f.column())
+	}
+	task := f.board.tasks[f.taskID]
+	task.MergeCommitSHA = "mainsha"
+	f.board.tasks[f.taskID] = task
+
+	f.gh.runs = []port.ActionsRun{{Status: "in_progress", HTMLURL: "prod1"}}
+	f.sweep(t)
+	if f.column() != domain.TaskColumnDone {
+		t.Fatalf("a running production deploy keeps it in done: %s", f.column())
+	}
+	if f.gh.lastRunBranch != "master" {
+		t.Fatalf("the release deploy is watched on the release branch, got %q", f.gh.lastRunBranch)
+	}
+
+	f.gh.runs = []port.ActionsRun{{Status: "completed", Conclusion: "success", HTMLURL: "prod1"}}
+	f.sweep(t)
+	if f.column() != domain.TaskColumnReleased {
+		t.Fatalf("a green production deploy releases the task: %s", f.column())
+	}
+	if f.merger.calls != 1 {
+		t.Fatal("the merge must not be attempted twice")
+	}
+}
+
+func TestAFailedReleaseDeployKeepsTheTaskInDone(t *testing.T) {
+	f := newFixture(t)
+	f.moveTo(t, domain.TaskColumnDone)
+	f.sweep(t)
+	task := f.board.tasks[f.taskID]
+	task.MergeCommitSHA = "mainsha"
+	f.board.tasks[f.taskID] = task
+	f.gh.runs = []port.ActionsRun{{Status: "completed", Conclusion: "failure", HTMLURL: "prod-bad"}}
+	f.sweep(t)
+	if f.column() != domain.TaskColumnDone {
+		t.Fatalf("column %s", f.column())
+	}
+	if !strings.Contains(strings.Join(f.board.comments, "\n"), "deploy for mainsha FAILED") {
+		t.Errorf("comments: %v", f.board.comments)
+	}
+}
+
+func TestARefusedReleaseMergeIsReportedOnce(t *testing.T) {
+	f := newFixture(t)
+	f.moveTo(t, domain.TaskColumnDone)
+	f.merger.err = errors.New("GitHub reports pull request #1 as `blocked`")
+	f.sweep(t)
+	f.sweep(t)
+	if f.column() != domain.TaskColumnDone {
+		t.Fatalf("column %s", f.column())
+	}
+	var refusals int
+	for _, c := range f.board.comments {
+		if strings.Contains(c, "was refused") {
+			refusals++
+		}
+	}
+	if refusals != 1 {
+		t.Fatalf("one refusal comment, got %d: %v", refusals, f.board.comments)
+	}
+}
+
+func TestReleaseBranchForWorkspace(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if got := f.svc.ReleaseBranchForWorkspace(ctx, "/ws/task-"+f.taskID.String()); got != "master" {
+		t.Errorf("task workspace: %q", got)
+	}
+	if got := f.svc.ReleaseBranchForWorkspace(ctx, "/ws/repos/app"); got != "" {
+		t.Errorf("a repository clone has no task: %q", got)
+	}
+	if got := f.svc.ReleaseBranchForWorkspace(ctx, "/ws/task-"+uuid.NewString()); got != "" {
+		t.Errorf("unknown task: %q", got)
+	}
+	f.flows.flows[f.repoID] = domain.BranchFlow{RepositoryID: f.repoID, IntegrationBranch: "development"}
+	if got := f.svc.ReleaseBranchForWorkspace(ctx, "/ws/task-"+f.taskID.String()); got != "" {
+		t.Errorf("no release branch configured means the default branch: %q", got)
 	}
 }
 
 func TestConflictSendsTheTaskBack(t *testing.T) {
 	f := newFixture(t)
 	f.gh.nextState = "dirty"
+	f.hold(t)
 	f.sweep(t)
 	rec := f.sweep(t)
 	if rec.Status != domain.IntegrationConflict || rec.Reason != domain.IntegrationReasonConflict {
-		t.Fatalf("status %s", rec.Status)
+		t.Fatalf("status %s reason %s", rec.Status, rec.Reason)
 	}
 	if f.column() != domain.TaskColumnNeedRevision {
 		t.Fatalf("column %s", f.column())
@@ -276,30 +415,41 @@ func TestConflictSendsTheTaskBack(t *testing.T) {
 
 func TestRevisionIsMergedAgain(t *testing.T) {
 	f := newFixture(t)
+	f.hold(t)
 	f.sweep(t)
 	f.sweep(t)
 	f.gh.runs = []port.ActionsRun{{Status: "completed", Conclusion: "success"}}
 	f.sweep(t)
-
-	f.gh.head = "h2"
-	if _, err := f.svc.Release(context.Background(), f.repoID, f.taskID); !errors.Is(err, domain.ErrReleaseNotReady) ||
-		!strings.Contains(err.Error(), "branch has moved") {
-		t.Fatalf("release with unmerged new commits: %v", err)
+	if f.column() != domain.TaskColumnReadyForQA {
+		t.Fatalf("column %s", f.column())
 	}
 
+	// Revision: back to code_review with new commits, held again.
+	f.moveTo(t, domain.TaskColumnCodeReview)
+	f.gh.head = "h2"
 	f.gh.runs = nil
+	f.hold(t)
 	rec := f.sweep(t)
-	if rec.HeadSHA != "h2" || rec.Status == domain.IntegrationMerged && rec.MergeSHA == "m-h1" {
+	if rec.HeadSHA != "h2" || rec.Status == domain.IntegrationMerged {
 		t.Fatalf("new head not picked up: %+v", rec)
 	}
 	rec = f.sweep(t)
-	if rec.Status != domain.IntegrationMerged || rec.MergeSHA != "m-h2" || rec.DeployStatus != domain.IntegrationDeployPending {
+	if rec.Status != domain.IntegrationMerged || rec.MergeSHA != "m-h2" {
 		t.Fatalf("new head merged: %+v", rec)
+	}
+	if f.column() != domain.TaskColumnCodeReview {
+		t.Fatalf("still waiting for the new deploy: %s", f.column())
+	}
+	f.gh.runs = []port.ActionsRun{{Status: "completed", Conclusion: "success"}}
+	f.sweep(t)
+	if f.column() != domain.TaskColumnReadyForQA {
+		t.Fatalf("column %s", f.column())
 	}
 }
 
-func TestFailedDeployBlocksRelease(t *testing.T) {
+func TestAFailedIntegrationDeployKeepsTheTaskInReview(t *testing.T) {
 	f := newFixture(t)
+	f.hold(t)
 	f.sweep(t)
 	f.sweep(t)
 	f.gh.runs = []port.ActionsRun{
@@ -310,111 +460,106 @@ func TestFailedDeployBlocksRelease(t *testing.T) {
 	if rec.DeployStatus != domain.IntegrationDeployFailure || rec.DeployURL != "bad" {
 		t.Fatalf("%+v", rec)
 	}
-	_, err := f.svc.Release(context.Background(), f.repoID, f.taskID)
-	if !errors.Is(err, domain.ErrReleaseNotReady) || !strings.Contains(err.Error(), "deploy failed") {
-		t.Fatalf("release after a failed deploy: %v", err)
+	if f.column() != domain.TaskColumnCodeReview {
+		t.Fatalf("a failed deploy does not hand the task to QA: %s", f.column())
 	}
-	if f.column() != domain.TaskColumnHumanUAT {
-		t.Fatal("a refused release does not move the task")
+	if !strings.Contains(strings.Join(f.board.comments, "\n"), "FAILED") {
+		t.Errorf("comments: %v", f.board.comments)
 	}
 }
 
 func TestNoWorkflowMeansNoDeploy(t *testing.T) {
 	f := newFixture(t)
+	f.hold(t)
 	f.sweep(t)
 	f.sweep(t)
 	if rec := f.sweep(t); rec.DeployStatus != domain.IntegrationDeployPending {
 		t.Fatalf("right after the merge: %+v", rec)
 	}
+	if f.column() != domain.TaskColumnCodeReview {
+		t.Fatalf("column %s", f.column())
+	}
 	f.now = f.now.Add(noRunGrace)
 	if rec := f.sweep(t); rec.DeployStatus != domain.IntegrationDeployNone {
 		t.Fatalf("after the grace period: %+v", rec)
 	}
-	if _, err := f.svc.Release(context.Background(), f.repoID, f.taskID); err != nil {
-		t.Fatalf("a branch with no deploy can be released: %v", err)
+	if f.column() != domain.TaskColumnReadyForQA {
+		t.Fatalf("a branch with no deploy still reaches QA: %s", f.column())
 	}
 }
 
-func TestReleaseKeepsTheApprovalWhenTheMergeIsRefused(t *testing.T) {
+func TestOnlyTheFlowsOwnColumnsAreTouched(t *testing.T) {
 	f := newFixture(t)
+	f.hold(t)
+	f.moveTo(t, domain.TaskColumnInQA)
 	f.sweep(t)
-	f.sweep(t)
-	f.gh.runs = []port.ActionsRun{{Status: "completed", Conclusion: "success"}}
-	f.sweep(t)
-	f.merger.err = errors.New("GitHub reports pull request #1 as `blocked`")
-	res, err := f.svc.Release(context.Background(), f.repoID, f.taskID)
-	if err != nil || res.MergeError == "" || res.Merge != nil {
-		t.Fatalf("%+v %v", res, err)
+	if f.gh.created != 0 || f.merger.calls != 0 {
+		t.Fatal("a task between the two stages was touched")
 	}
-	if f.column() != domain.TaskColumnDone {
-		t.Fatalf("column %s", f.column())
-	}
-	if !strings.Contains(f.board.comments[len(f.board.comments)-1], "merging into the default branch was refused") {
-		t.Errorf("comments: %v", f.board.comments)
-	}
-}
-
-func TestOnlyHumanUATTasksOfFlowReposAreTouched(t *testing.T) {
-	f := newFixture(t)
-	task := f.board.tasks[f.taskID]
-	task.Column = domain.TaskColumnInQA
-	f.board.tasks[f.taskID] = task
-	f.sweep(t)
-	if len(f.flows.recs) != 0 || f.gh.created != 0 {
-		t.Fatal("a task outside human_uat was touched")
-	}
+	f.moveTo(t, domain.TaskColumnCodeReview)
 	delete(f.flows.flows, f.repoID)
-	task.Column = domain.TaskColumnHumanUAT
-	f.board.tasks[f.taskID] = task
 	f.sweep(t)
-	if len(f.flows.recs) != 0 {
+	if f.gh.created != 0 {
 		t.Fatal("a repository without a flow was touched")
-	}
-	if _, err := f.svc.Release(context.Background(), f.repoID, f.taskID); !errors.Is(err, domain.ErrBranchFlowNotFound) {
-		t.Fatalf("release without a flow: %v", err)
 	}
 }
 
 func TestMissingTokenIsReportedOnce(t *testing.T) {
 	f := newFixture(t)
 	f.svc.tokens = func(context.Context) (string, error) { return "", nil }
+	f.hold(t)
 	f.sweep(t)
 	f.sweep(t)
 	rec := f.flows.recs[f.taskID]
-	if rec.Status != domain.IntegrationFailed || rec.Reason != domain.IntegrationReasonNoToken || !strings.Contains(rec.Detail, "GitHub is not connected") {
+	if rec.Status != domain.IntegrationFailed || rec.Reason != domain.IntegrationReasonNoToken ||
+		!strings.Contains(rec.Detail, "GitHub is not connected") {
 		t.Fatalf("%+v", rec)
 	}
 	if len(f.board.comments) != 1 {
 		t.Fatalf("comments: %v", f.board.comments)
 	}
+	if f.column() != domain.TaskColumnCodeReview {
+		t.Fatalf("column %s", f.column())
+	}
 }
 
-func TestSetFlowValidatesTheBranch(t *testing.T) {
+func TestSetFlowValidatesTheBranches(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	for _, bad := range []string{"has space", "-x", "a..b", "a/", "x.lock", "a;rm"} {
-		if _, err := f.svc.SetFlow(ctx, f.repoID, bad); err == nil {
-			t.Errorf("%q accepted", bad)
+		if _, err := f.svc.SetFlow(ctx, f.repoID, bad, "master"); err == nil {
+			t.Errorf("integration %q accepted", bad)
+		}
+		if _, err := f.svc.SetFlow(ctx, f.repoID, "development", bad); err == nil {
+			t.Errorf("release %q accepted", bad)
 		}
 	}
-	if fl, err := f.svc.SetFlow(ctx, f.repoID, " release/dev "); err != nil || fl.IntegrationBranch != "release/dev" {
+	if _, err := f.svc.SetFlow(ctx, f.repoID, "development", "development"); err == nil {
+		t.Error("the same branch for both was accepted")
+	}
+	fl, err := f.svc.SetFlow(ctx, f.repoID, " release/dev ", " master ")
+	if err != nil || fl.IntegrationBranch != "release/dev" || fl.ReleaseBranch != "master" {
 		t.Fatalf("%+v %v", fl, err)
 	}
-	if _, err := f.svc.SetFlow(ctx, f.repoID, ""); err != nil || f.svc.Enabled(ctx, f.repoID) {
-		t.Fatalf("clearing the branch turns the flow off: %v", err)
+	if fl, err := f.svc.SetFlow(ctx, f.repoID, "development", ""); err != nil || fl.ReleaseBranch != "" {
+		t.Fatalf("an empty release branch means the default branch: %+v %v", fl, err)
+	}
+	if _, err := f.svc.SetFlow(ctx, f.repoID, "", ""); err != nil || f.svc.Enabled(ctx, f.repoID) {
+		t.Fatalf("clearing the integration branch turns the flow off: %v", err)
 	}
 }
 
 func TestBlockedPRWaits(t *testing.T) {
 	f := newFixture(t)
 	f.gh.nextState = "blocked"
+	f.hold(t)
 	f.sweep(t)
 	rec := f.sweep(t)
 	if rec.Status != domain.IntegrationWaiting || rec.Reason != domain.IntegrationReasonChecksPending ||
 		!strings.Contains(rec.Detail, "`blocked`") || f.gh.mergeCalls != 0 {
 		t.Fatalf("%+v", rec)
 	}
-	if f.column() != domain.TaskColumnHumanUAT {
+	if f.column() != domain.TaskColumnCodeReview {
 		t.Fatal("waiting does not move the task")
 	}
 }

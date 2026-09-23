@@ -886,10 +886,13 @@ export interface AttachmentMeta {
 export interface BranchFlowSettings {
   enabled: boolean;
   integration_branch: string;
+  /** Empty: the repository's GitHub default branch. */
+  release_branch: string;
 }
 
 export type IntegrationStatus = "waiting" | "merged" | "conflict" | "failed";
 export type IntegrationReason =
+  | "release_refused"
   | "no_token"
   | "no_pull_request"
   | "pull_request_closed"
@@ -909,6 +912,9 @@ export interface TaskIntegration {
   head_sha?: string;
   merge_sha?: string;
   status: IntegrationStatus;
+  promote_to?: string;
+  release_deploy_status?: IntegrationDeployStatus | "";
+  release_deploy_url?: string;
   reason?: IntegrationReason | "";
   detail?: string;
   deploy_status?: IntegrationDeployStatus | "";
@@ -923,11 +929,6 @@ export interface TaskIntegrationResponse {
   integration?: TaskIntegration;
 }
 
-export interface TaskReleaseResult {
-  task: BoardTask;
-  merge?: { merged: boolean; merge_commit_sha?: string; pr_url?: string };
-  merge_error?: string;
-}
 
 export interface BoardTask {
   id: string;
@@ -3604,17 +3605,14 @@ export const api = {
   getBranchFlow: (repositoryId: string) =>
     request<BranchFlowSettings>(`/v1/repositories/${repositoryId}/branch-flow`),
 
-  setBranchFlow: (repositoryId: string, integrationBranch: string) =>
+  setBranchFlow: (repositoryId: string, integrationBranch: string, releaseBranch = "") =>
     request<BranchFlowSettings>(`/v1/repositories/${repositoryId}/branch-flow`, {
       method: "PUT",
-      body: JSON.stringify({ integration_branch: integrationBranch }),
+      body: JSON.stringify({ integration_branch: integrationBranch, release_branch: releaseBranch }),
     }),
 
   getTaskIntegration: (repositoryId: string, taskId: string) =>
     request<TaskIntegrationResponse>(`/v1/repositories/${repositoryId}/tasks/${taskId}/integration`),
-
-  releaseTask: (repositoryId: string, taskId: string) =>
-    request<TaskReleaseResult>(`/v1/repositories/${repositoryId}/tasks/${taskId}/release`, { method: "POST" }),
 
   deleteRepositoryTask: (repositoryId: string, taskId: string) =>
     request<void>(`/v1/repositories/${repositoryId}/tasks/${taskId}`, { method: "DELETE" }),

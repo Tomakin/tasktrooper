@@ -1706,6 +1706,16 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					PRs:    prAPI,
 					GitHub: prAPI,
 					Tokens: githubTokens.GitHubToken,
+					DefaultBranch: func(ctx context.Context, repositoryID uuid.UUID) string {
+						if gitClient == nil {
+							return ""
+						}
+						root, err := repositorySvc.ResolveRootPath(ctx, repositoryID)
+						if err != nil {
+							return ""
+						}
+						return gitClient.DefaultBranch(ctx, root)
+					},
 					Coordinates: func(ctx context.Context, repositoryID uuid.UUID) (string, string, error) {
 						if gitClient == nil {
 							return "", "", fmt.Errorf("git is not configured on this deployment")
@@ -1722,6 +1732,13 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					},
 				})
 				repositorySvc.SetBranchFlow(branchFlowSvc)
+				if boardDispatcher != nil {
+					boardDispatcher.SetBranchFlow(branchFlowSvc)
+				}
+				// One resolver answers every "what is this checkout based on?"
+				// question in the git adapter: the PR base, the rebase target
+				// and the drift check.
+				gitClient.SetBaseBranchResolver(branchFlowSvc.ReleaseBranchForWorkspace)
 				if boardRunner != nil {
 					boardRunner.SetBranchFlow(branchFlowSvc)
 				}

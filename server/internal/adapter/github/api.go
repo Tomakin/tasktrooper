@@ -280,10 +280,18 @@ func GetRepo(ctx context.Context, token, owner, name string) (Repo, error) {
 }
 
 // FindOpenPR, head branch'i için açık PR varsa URL'ini döndürür; yoksa "".
-func FindOpenPR(ctx context.Context, token, owner, name, headOwner, branch string) (string, error) {
+//
+// base narrows the search to pull requests going into that branch. It matters
+// on a repository running the two-stage flow, where the same branch has a
+// second open pull request into the integration branch: without the filter
+// this could hand back the integration PR as if it were the task's own.
+func FindOpenPR(ctx context.Context, token, owner, name, headOwner, branch, base string) (string, error) {
 	q := url.Values{}
 	q.Set("head", headOwner+":"+branch)
 	q.Set("state", "open")
+	if strings.TrimSpace(base) != "" {
+		q.Set("base", base)
+	}
 	var out []struct {
 		HTMLURL string `json:"html_url"`
 	}

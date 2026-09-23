@@ -188,9 +188,17 @@ type PullRequestReader interface {
 // in front of the revision run that has to act on them.
 func (r *Runner) SetPullRequestReader(reader PullRequestReader) { r.prReader = reader }
 
-// BranchFlowChecker reports whether a repository runs the two-stage delivery.
+// BranchFlowChecker reports whether a repository runs the two-stage delivery,
+// and holds the move that flow owns.
 type BranchFlowChecker interface {
 	Enabled(ctx context.Context, repositoryID uuid.UUID) bool
+	// HoldReviewPromotion reports that this move is the flow's to make: the
+	// card stays where it is until the change is on the integration branch and
+	// that deploy is green.
+	HoldReviewPromotion(ctx context.Context, task domain.BoardTask, from, to domain.TaskColumn, actor domain.TaskActor) bool
+	// IsHeld reports that the flow already owns this task's next move, so the
+	// runner must not nudge its reviewer to make it.
+	IsHeld(ctx context.Context, taskID uuid.UUID) bool
 }
 
 // SetBranchFlow wires the two-stage delivery lookup. Optional: nil is the

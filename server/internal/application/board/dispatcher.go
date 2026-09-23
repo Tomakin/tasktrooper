@@ -143,8 +143,17 @@ func (d *Dispatcher) Dispatch(ctx context.Context, input DispatchInput) error {
 	}
 
 	mergeWake := doneMergeWake(input)
-	if mergeWake && d.branchFlow != nil && d.branchFlow.Enabled(ctx, input.RepositoryID) {
-		mergeWake = false
+	if d.branchFlow != nil && d.branchFlow.Enabled(ctx, input.RepositoryID) {
+		if mergeWake {
+			mergeWake = false
+		}
+		// The flow narrates what it is doing on the card ("merged into
+		// development", "the deploy failed"). Those are notes, not requests: it
+		// makes the moves itself, and a comment in a review column would
+		// otherwise dispatch that column's agent to read its own status.
+		if input.EventType == domain.BoardEventTaskCommented && systemAuthored(payload) {
+			return nil
+		}
 	}
 	watchWake := deployWatchWake(input)
 	if isDispatchSuspendedTask(input.Task) && !mergeWake && !watchWake {
@@ -310,6 +319,12 @@ func parkResume(payload map[string]interface{}) (string, bool) {
 		return "", false
 	}
 	return resource, true
+}
+
+// systemAuthored reports a comment the control plane wrote itself.
+func systemAuthored(payload map[string]interface{}) bool {
+	authorType, _ := payload["author_type"].(string)
+	return authorType == "system"
 }
 
 func actorAgentIDFromPayload(payload map[string]interface{}) uuid.UUID {

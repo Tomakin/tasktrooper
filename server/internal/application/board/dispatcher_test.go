@@ -1264,3 +1264,76 @@ func (s *DispatcherSuite) TestDispatchQACarriesTheGateReasonWhenTheGateWasForced
 	s.Equal("gate_opened", payload["pipeline"], "a forced-open gate must not report itself as a success")
 	s.Equal(domain.MoveReasonPipelineGateOpened, payload[domain.EventPayloadReason])
 }
+
+// flowRepo is a branch-flow checker that claims every repository.
+type flowRepo struct{}
+
+func (flowRepo) Enabled(context.Context, uuid.UUID) bool { return true }
+func (flowRepo) HoldReviewPromotion(context.Context, domain.BoardTask, domain.TaskColumn, domain.TaskColumn, domain.TaskActor) bool {
+	return false
+}
+func (flowRepo) IsHeld(context.Context, uuid.UUID) bool { return false }
+
+func (s *DispatcherSuite) TestFlowStatusCommentsDoNotWakeTheColumnsAgent() {
+	reviewer := uuid.New()
+	s.board.agentsByColumn["code_review"] = []uuid.UUID{reviewer}
+	repositoryID := uuid.New()
+	task := domain.BoardTask{
+		ID:           uuid.New(),
+		RepositoryID: repositoryID,
+		Title:        "t",
+		Column:       domain.TaskColumnCodeReview,
+	}
+	comment := board.DispatchInput{
+		RepositoryID: repositoryID,
+		Task:         task,
+		EventType:    domain.BoardEventTaskCommented,
+		Payload:      map[string]interface{}{"author_type": "system", "content": "Merged into `development`"},
+	}
+
+	// Without the flow the comment is a hand-off signal like any other.
+	s.Require().NoError(s.disp.Dispatch(context.Background(), comment))
+	s.Len(s.runner.jobs, 1)
+
+	s.runner.jobs = nil
+	s.disp.SetBranchFlow(flowRepo{})
+	s.Require().NoError(s.disp.Dispatch(context.Background(), comment))
+	s.Empty(s.runner.jobs, "the flow's own status note must not dispatch")
+
+	// A human's comment still reaches the reviewer. Its own card, because the
+	// dispatch above left a pending run that would suppress a second one.
+	s.runner.jobs = nil
+	human := comment
+	human.Task.ID = uuid.New()
+	human.Payload = map[string]interface{}{"author_type": "user", "content": "please also check the mobile view"}
+	s.Require().NoError(s.disp.Dispatch(context.Background(), human))
+	s.Len(s.runner.jobs, 1)
+}
+
+// done is the flow's column too: it merges and watches the deploy, so QA is not
+// woken to do the merge it is already doing.
+func (s *DispatcherSuite) TestDoneMergeWakeIsSkippedForFlowRepositories() {
+	qa := uuid.New()
+	s.board.agentsByColumn["done"] = []uuid.UUID{qa}
+	repositoryID := uuid.New()
+	moved := board.DispatchInput{
+		RepositoryID: repositoryID,
+		Task: domain.BoardTask{
+			ID:           uuid.New(),
+			RepositoryID: repositoryID,
+			Title:        "t",
+			Column:       domain.TaskColumnDone,
+			TaskType:     domain.TaskTypeTask,
+			PRURL:        "https://github.com/acme/app/pull/1",
+		},
+		EventType: domain.BoardEventTaskMoved,
+	}
+
+	s.Require().NoError(s.disp.Dispatch(context.Background(), moved))
+	s.Len(s.runner.jobs, 1)
+
+	s.runner.jobs = nil
+	s.disp.SetBranchFlow(flowRepo{})
+	s.Require().NoError(s.disp.Dispatch(context.Background(), moved))
+	s.Empty(s.runner.jobs, "the flow merges in done; QA must not be woken for it")
+}

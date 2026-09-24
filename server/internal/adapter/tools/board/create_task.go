@@ -241,7 +241,7 @@ func (t *createTaskTool) Execute(ctx context.Context, arguments string) domain.T
 		req.InitiativeProjectID = &parsed
 	}
 	if args.Assignee != "" {
-		assigneeID, err := t.resolveAssignee(ctx, args.Assignee)
+		assigneeID, err := t.kit.resolveAssignee(ctx, args.Assignee)
 		if err != nil {
 			return toolError(createBoardTaskToolName, err.Error())
 		}
@@ -320,14 +320,14 @@ func (t *createTaskTool) Execute(ctx context.Context, arguments string) domain.T
 // that agent on creation. Name lookup is case-insensitive and needs the Team
 // lister; if it is unavailable or the name is unknown, it returns an error
 // naming the valid options rather than silently leaving the task unassigned.
-func (t *createTaskTool) resolveAssignee(ctx context.Context, assignee string) (uuid.UUID, error) {
+func (k *ToolKit) resolveAssignee(ctx context.Context, assignee string) (uuid.UUID, error) {
 	if id, err := uuid.Parse(assignee); err == nil {
 		return id, nil
 	}
-	if t.kit.Team == nil {
+	if k.Team == nil {
 		return uuid.Nil, fmt.Errorf("assignee %q is not a UUID and the team roster is unavailable to resolve it", assignee)
 	}
-	agents, err := t.kit.Team.ListAgents(ctx)
+	agents, err := k.Team.ListAgents(ctx)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("resolve assignee: %v", err)
 	}

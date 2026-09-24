@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -23,6 +25,11 @@ type updateTaskArgs struct {
 	AcceptanceCriteria *[]string `json:"acceptance_criteria"`
 	Column             string    `json:"column"`
 	Priority           string    `json:"priority"`
+	// Assignee hands the task to another agent. Empty leaves the current one
+	// alone; "-" clears it. Without this a reviewer could say who should own a
+	// card but not make it so — the card then sat where it was with a comment
+	// on it.
+	Assignee string `json:"assignee"`
 	// Project tags an existing task with an initiative (name or UUID). Without
 	// it a task created before the initiative existed could never be filed.
 	Project string `json:"project"`
@@ -95,6 +102,10 @@ func (t *updateTaskTool) Definition() domain.ToolDefinition {
 						"type":        "string",
 						"description": "File this task under an initiative: project name or UUID. Use list_projects for valid names.",
 					},
+					"assignee": map[string]interface{}{
+						"type":        "string",
+						"description": "Hand the task to an agent: its name (e.g. \"frontend-developer\") or UUID; the new assignee is dispatched. \"-\" leaves the task unassigned. Omit to keep the current assignee. Use list_team for valid names.",
+					},
 					"before_deploy": map[string]interface{}{
 						"type":        "string",
 						"description": "Pre-deploy checklist (markdown): what must be true or done before this ships. Posted on the task automatically when the release is dispatched — do not write it as a comment.",
@@ -154,6 +165,17 @@ func (t *updateTaskTool) Execute(ctx context.Context, arguments string) domain.T
 	if args.Priority != "" {
 		p := domain.TaskPriority(args.Priority)
 		req.Priority = &p
+	}
+	if assignee := strings.TrimSpace(args.Assignee); assignee != "" {
+		if assignee == "-" {
+			req.AssigneeAgentID = domain.Nullable[uuid.UUID]{Present: true}
+		} else {
+			assigneeID, assigneeErr := t.kit.resolveAssignee(ctx, assignee)
+			if assigneeErr != nil {
+				return toolError(updateBoardTaskToolName, assigneeErr.Error())
+			}
+			req.AssigneeAgentID = domain.Nullable[uuid.UUID]{Present: true, Value: &assigneeID}
+		}
 	}
 	if strings.TrimSpace(args.Project) != "" {
 		projectID, projErr := t.kit.resolveProjectRef(ctx, args.Project)

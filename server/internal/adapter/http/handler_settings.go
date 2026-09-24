@@ -32,6 +32,15 @@ func (h *Handler) GetSettings(c *fiber.Ctx) error {
 	return c.JSON(out)
 }
 
+// settingsRequestIsEmpty reports a request that names no field. Every field
+// belongs here: one left out is a save the UI reports as done and the server
+// refuses as empty.
+func settingsRequestIsEmpty(req domain.UpdateSettingsRequest) bool {
+	return req.WorkspaceRoot == "" && req.DefaultLanguage == "" &&
+		req.PipelineContainerRuntime == "" && req.BoilerplateCatalogRepo == "" &&
+		req.DefaultAssignee == ""
+}
+
 func (h *Handler) UpdateSettings(c *fiber.Ctx) error {
 	if h.settingsSvc == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(errorResponse{
@@ -42,7 +51,7 @@ func (h *Handler) UpdateSettings(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return badRequest(c, "invalid request body")
 	}
-	if req.WorkspaceRoot == "" && req.DefaultLanguage == "" && req.PipelineContainerRuntime == "" && req.BoilerplateCatalogRepo == "" {
+	if settingsRequestIsEmpty(req) {
 		return badRequest(c, "at least one settings field is required")
 	}
 	out, err := h.settingsSvc.Update(h.enrichContext(c), req)

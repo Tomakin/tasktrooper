@@ -173,19 +173,19 @@ type Config struct {
 	TaskChat          TaskChatControl
 	// BranchFlow is the two-stage delivery (development → main). Nil mounts
 	// none of its routes.
-	BranchFlow        BranchFlowControl
-	EvolutionSvc      *evolution.Service
-	MemorySvc         *memory.Service
-	KPISvc            *kpi.Service
+	BranchFlow   BranchFlowControl
+	EvolutionSvc *evolution.Service
+	MemorySvc    *memory.Service
+	KPISvc       *kpi.Service
 	// AgentConcurrency is the concurrent agent sessions setting. Nil mounts
 	// none of its routes.
-	AgentConcurrency  AgentConcurrencyControl
-	PerfStore         port.AgentPerformanceStore
-	GoldenStore       port.GoldenTaskStore
-	UsageStore        port.LLMUsageStore
-	BillingSvc        *billing.Service
-	UIRoot            string
-	UIFS              fs.FS
+	AgentConcurrency AgentConcurrencyControl
+	PerfStore        port.AgentPerformanceStore
+	GoldenStore      port.GoldenTaskStore
+	UsageStore       port.LLMUsageStore
+	BillingSvc       *billing.Service
+	UIRoot           string
+	UIFS             fs.FS
 	// WebAuth enables browser sign-in beside the bearer token. Nil keeps the
 	// bearer as the only credential.
 	WebAuth           *webauth.Service

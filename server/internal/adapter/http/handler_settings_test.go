@@ -177,3 +177,22 @@ func TestUpdateAnalizAssignmentConfirmGrantToolsSavesAndWidensPolicy(t *testing.
 		t.Fatalf("expected create_board_task to be granted to the agent, got %v", updated.ToolPolicy.AllowTools)
 	}
 }
+
+// Every settings field has to count as one: a request carrying only the new
+// field was refused as empty, so the UI's save did nothing and said nothing.
+func TestSettingsRequestIsEmpty(t *testing.T) {
+	if !settingsRequestIsEmpty(domain.UpdateSettingsRequest{}) {
+		t.Error("a request naming nothing is empty")
+	}
+	for name, req := range map[string]domain.UpdateSettingsRequest{
+		"workspace root":    {WorkspaceRoot: "/srv"},
+		"language":          {DefaultLanguage: "tr"},
+		"container runtime": {PipelineContainerRuntime: "podman"},
+		"boilerplate":       {BoilerplateCatalogRepo: "github.com/x/y"},
+		"default assignee":  {DefaultAssignee: "system-architect"},
+	} {
+		if settingsRequestIsEmpty(req) {
+			t.Errorf("a request naming only the %s is not empty", name)
+		}
+	}
+}

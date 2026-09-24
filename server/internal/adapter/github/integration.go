@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -92,6 +93,27 @@ func (a *PRAPI) ListPushRuns(ctx context.Context, token, owner, repo, branch, sh
 		return nil, err
 	}
 	return mapActionsRuns(out.WorkflowRuns), nil
+}
+
+// RunFailureLog returns the tail of the first failing job's log. The card gets
+// the error itself: an agent on this host cannot open a GitHub Actions page,
+// so a link alone tells it only that something went wrong.
+func (a *PRAPI) RunFailureLog(ctx context.Context, token, owner, repo string, runID int64, maxBytes int) (string, error) {
+	jobs, err := listRunJobsAt(ctx, a.baseURL, token, owner, repo, runID)
+	if err != nil {
+		return "", err
+	}
+	for _, job := range jobs {
+		if !strings.EqualFold(job.Conclusion, "failure") {
+			continue
+		}
+		log, err := getJobLogsAt(ctx, a.baseURL, token, owner, repo, job.ID)
+		if err != nil {
+			return "", fmt.Errorf("read the log of job %q: %w", job.Name, err)
+		}
+		return job.Name + ":\n" + domain.TruncateTail(log, maxBytes), nil
+	}
+	return "", nil
 }
 
 var _ port.IntegrationGitHub = (*PRAPI)(nil)

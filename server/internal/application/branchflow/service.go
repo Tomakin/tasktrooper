@@ -32,6 +32,11 @@ import (
 
 const (
 	DefaultSweepInterval = 30 * time.Second
+	// maxDeployLog is how much of a failing job's log the card carries. Enough
+	// for a compiler's diagnosis, small enough to stay readable on a card and
+	// in the context of the run that has to fix it.
+	maxDeployLog = 4000
+
 	// noRunGrace is how long after the merge a push with no workflow run is
 	// still "pending" rather than "this branch has no deploy". GitHub queues a
 	// push run within seconds; minutes of nothing means nothing is coming.
@@ -452,6 +457,7 @@ func (s *Service) watchDeploy(ctx context.Context, task domain.BoardTask, prev, 
 		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("branch flow: listing push runs failed")
 		return rec
 	}
+	before := rec.DeployStatus
 	rec.DeployStatus, rec.DeployURL = deployVerdict(runs)
 	if rec.DeployStatus == "" {
 		rec.DeployStatus = domain.IntegrationDeployPending
@@ -460,7 +466,41 @@ func (s *Service) watchDeploy(ctx context.Context, task domain.BoardTask, prev, 
 		}
 	}
 	s.save(ctx, task, prev, rec)
+	if rec.DeployStatus == domain.IntegrationDeployFailure && before != domain.IntegrationDeployFailure {
+		s.sendBackForDeploy(ctx, task, rec, runs, token, owner, repo)
+	}
 	return rec
+}
+
+// sendBackForDeploy hands a failed integration deploy to its developer, with
+// the failing job's own output on the card. Without the log the card carries a
+// link to a GitHub Actions page, which the agent that has to fix it cannot
+// open — it would be told only that something went wrong.
+func (s *Service) sendBackForDeploy(ctx context.Context, task domain.BoardTask, rec domain.TaskIntegration,
+	runs []port.ActionsRun, token, owner, repo string) {
+	detail := ""
+	for _, run := range runs {
+		if !strings.EqualFold(run.Conclusion, "failure") {
+			continue
+		}
+		if out, err := s.gh.RunFailureLog(ctx, token, owner, repo, run.ID, maxDeployLog); err != nil {
+			log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("branch flow: reading the failing deploy log failed")
+		} else if strings.TrimSpace(out) != "" {
+			detail = "\n\n```\n" + out + "\n```"
+		}
+		break
+	}
+	s.comment(ctx, task, fmt.Sprintf(
+		"The `%s` deploy for %s failed, so the change is on that branch but broken there. Fix it on this task's branch; "+
+			"it is merged into `%s` again and the deploy re-run when the review passes.%s",
+		rec.Branch, domain.ShortSHA(rec.MergeSHA), rec.Branch, detail))
+	column := domain.TaskColumnNeedRevision
+	if _, err := s.board.UpdateTask(ctx, task.RepositoryID, task.ID, domain.UpdateBoardTaskRequest{
+		Column:       &column,
+		SystemReason: "the integration deploy failed",
+	}); err != nil {
+		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("branch flow: moving the failed deploy back to need_revision failed")
+	}
 }
 
 // deployVerdict folds the push's runs into one answer: any run still going is
@@ -522,8 +562,8 @@ func transitionNote(prev, rec domain.TaskIntegration) string {
 			return fmt.Sprintf("The `%s` deploy for %s succeeded (%s). Test it there, then approve or request a revision.",
 				rec.Branch, domain.ShortSHA(rec.MergeSHA), rec.DeployURL)
 		case domain.IntegrationDeployFailure:
-			return fmt.Sprintf("The `%s` deploy for %s FAILED (%s). The task cannot be released until it is fixed.",
-				rec.Branch, domain.ShortSHA(rec.MergeSHA), rec.DeployURL)
+			// sendBackForDeploy writes the failure, with the log and the move.
+			return ""
 		case domain.IntegrationDeployNone:
 			return fmt.Sprintf("No workflow ran for the push to `%s`, so there is no deploy to wait for. Test the change there, then approve or request a revision.",
 				rec.Branch)

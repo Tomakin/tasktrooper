@@ -117,6 +117,7 @@ type fakeGitHub struct {
 	created       int
 	mergeCalls    int
 	lastRunBranch string
+	failureLog    string
 }
 
 func newFakeGitHub() *fakeGitHub {
@@ -160,6 +161,13 @@ func (g *fakeGitHub) MergeWithMergeCommit(_ context.Context, _, _, _ string, n i
 	g.merged[n] = "m-" + sha
 	return "m-" + sha, nil
 }
+func (g *fakeGitHub) RunFailureLog(_ context.Context, _, _, _ string, runID int64, maxBytes int) (string, error) {
+	if g.failureLog == "" {
+		return "", nil
+	}
+	return "Kamal deploy:\n" + g.failureLog, nil
+}
+
 func (g *fakeGitHub) ListPushRuns(_ context.Context, _, _, _, branch, sha string) ([]port.ActionsRun, error) {
 	g.lastRunBranch = branch
 	return g.runs, nil
@@ -468,24 +476,38 @@ func TestRevisionIsMergedAgain(t *testing.T) {
 	}
 }
 
-func TestAFailedIntegrationDeployKeepsTheTaskInReview(t *testing.T) {
+func TestAFailedIntegrationDeployGoesBackToItsDeveloper(t *testing.T) {
 	f := newFixture(t)
+	f.gh.failureLog = "src/x.ts(9,7): error TS2739: missing endSession"
 	f.hold(t)
 	f.sweep(t)
 	f.sweep(t)
 	f.gh.runs = []port.ActionsRun{
-		{Status: "completed", Conclusion: "success", HTMLURL: "ok"},
-		{Status: "completed", Conclusion: "failure", HTMLURL: "bad"},
+		{ID: 1, Status: "completed", Conclusion: "success", HTMLURL: "ok"},
+		{ID: 2, Status: "completed", Conclusion: "failure", HTMLURL: "bad"},
 	}
 	rec := f.sweep(t)
 	if rec.DeployStatus != domain.IntegrationDeployFailure || rec.DeployURL != "bad" {
 		t.Fatalf("%+v", rec)
 	}
-	if f.column() != domain.TaskColumnCodeReview {
-		t.Fatalf("a failed deploy does not hand the task to QA: %s", f.column())
+	if f.column() != domain.TaskColumnNeedRevision {
+		t.Fatalf("a failed deploy is the developer's to fix: %s", f.column())
 	}
-	if !strings.Contains(strings.Join(f.board.comments, "\n"), "FAILED") {
-		t.Errorf("comments: %v", f.board.comments)
+	joined := strings.Join(f.board.comments, "\n")
+	if !strings.Contains(joined, "deploy for m-h1 failed") {
+		t.Errorf("the card does not say the deploy failed:\n%s", joined)
+	}
+	// The agent cannot open an Actions page, so the error has to be on the card.
+	if !strings.Contains(joined, "error TS2739") {
+		t.Errorf("the failing job's log is not on the card:\n%s", joined)
+	}
+
+	// The same verdict on a later pass must not send it back twice.
+	comments := len(f.board.comments)
+	f.moveTo(t, domain.TaskColumnCodeReview)
+	f.sweep(t)
+	if len(f.board.comments) != comments || f.column() != domain.TaskColumnCodeReview {
+		t.Errorf("the failure was reported again: %v", f.board.comments[comments:])
 	}
 }
 

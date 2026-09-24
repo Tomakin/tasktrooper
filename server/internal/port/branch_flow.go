@@ -36,4 +36,7 @@ type IntegrationGitHub interface {
 	MergeWithMergeCommit(ctx context.Context, token, owner, repo string, number int, expectedHeadSHA, title string) (mergeSHA string, err error)
 	// ListPushRuns returns the workflow runs a push of sha to branch started.
 	ListPushRuns(ctx context.Context, token, owner, repo, branch, sha string) ([]ActionsRun, error)
+	// RunFailureLog returns the tail of the failing job's log, so the card
+	// carries the error itself and not only a link an agent cannot open.
+	RunFailureLog(ctx context.Context, token, owner, repo string, runID int64, maxBytes int) (string, error)
 }

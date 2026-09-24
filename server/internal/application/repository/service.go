@@ -610,6 +610,35 @@ Once each workflow exists, save the job/workflow mapping under Repository Settin
 	})
 }
 
+// resolveDefaultAssignee reads the agent named by the default-assignee
+// setting. Nil when nothing is configured, the stores are not wired, or the
+// name matches no agent — all of which leave the task unassigned, as before.
+func (s *Service) resolveDefaultAssignee(ctx context.Context) *uuid.UUID {
+	if s.analizAssignment == nil || s.agentLister == nil {
+		return nil
+	}
+	settings, err := s.analizAssignment.Get(ctx)
+	if err != nil {
+		return nil
+	}
+	name := strings.TrimSpace(settings.DefaultAssignee)
+	if name == "" {
+		return nil
+	}
+	agents, err := s.agentLister(ctx)
+	if err != nil {
+		return nil
+	}
+	for i := range agents {
+		if agents[i].Name == name {
+			id := agents[i].ID
+			return &id
+		}
+	}
+	log.Warn().Str("default_assignee", name).Msg("the default assignee names no agent; the task stays unassigned")
+	return nil
+}
+
 // resolveAnalizAssignee overrides an analiz task's assignee with the agent
 // named by the backend/frontend/mobile analiz-assignment settings, regardless
 // of what the caller (typically the PM agent) requested — the setting exists
@@ -1795,6 +1824,12 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 		if resolved := s.resolveAnalizAssignee(ctx, repo); resolved != nil {
 			assignee = resolved
 		}
+	} else if assignee == nil {
+		// Nobody asked for an owner, and a board whose columns are owned by
+		// reviewers has none for todo: the card would sit there with no run and
+		// no error. The default assignee is who a task goes to until someone
+		// says otherwise.
+		assignee = s.resolveDefaultAssignee(ctx)
 	}
 	task, err := s.tasks.Create(ctx, domain.BoardTask{
 		RepositoryID:         repositoryID,

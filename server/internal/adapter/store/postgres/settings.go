@@ -77,6 +77,8 @@ func (s *SettingsStore) Get(ctx context.Context) (domain.AppSettings, error) {
 			if value != "" {
 				out.BoilerplateCatalogRepo = value
 			}
+		case "default_assignee":
+			out.DefaultAssignee = value
 		case "analiz_assignee_backend":
 			if value != "" {
 				out.AnalizAssigneeBackend = value
@@ -116,6 +118,7 @@ func (s *SettingsStore) Update(ctx context.Context, req domain.UpdateSettingsReq
 	for key, value := range map[string]string{
 		"pipeline_container_runtime": req.PipelineContainerRuntime,
 		"boilerplate_catalog_repo":   req.BoilerplateCatalogRepo,
+		"default_assignee":           req.DefaultAssignee,
 	} {
 		if value == "" {
 			continue

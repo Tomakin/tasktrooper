@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { api, type BoardColumn, type BoardTransition } from "@/api";
 import { Button } from "@/components/ui/button";
+import { DefaultAssigneeCard } from "@/components/admin/DefaultAssigneeCard";
 import { Card } from "@/components/ui/card";
 import {
   Dialog,
@@ -169,6 +170,8 @@ export function BoardSettingsPage() {
           </Button>
         </div>
       </div>
+
+      <DefaultAssigneeCard />
 
       <Card className="p-6">
         <h3 className="text-sm font-semibold">{t("settingsPages.board.columnsTitle")}</h3>

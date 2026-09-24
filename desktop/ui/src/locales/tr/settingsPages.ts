@@ -276,6 +276,13 @@ export const settingsPages: SettingsPagesDict = {
     daily: "Günlük",
   },
   board: {
+    defaultAssignee: {
+      title: "Varsayılan atama",
+      description: "Atanmadan oluşturulan görevin hangi ajana gideceğini belirler. Pano yalnız bir sahibi olan işi başlatır: kart ya atandığı ajana ya da bulunduğu sütuna abone ajana düşer; ajanların sahip olduğu sütunlar ise inceleme sütunlarıdır. Varsayılan seçilmezse Todo'ya bırakılan görev orada bekler.",
+      label: "Ajan",
+      nobody: "Kimse — görevleri ben atayacağım",
+      saved: "Varsayılan atama kaydedildi",
+    },
     loadFailed: "Yüklenemedi",
     invalidName: "Geçersiz ad",
     duplicateName: "Bu isimde bir kolon zaten var",

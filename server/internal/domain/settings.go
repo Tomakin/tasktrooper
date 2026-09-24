@@ -31,6 +31,11 @@ type AppSettings struct {
 	AnalizAssigneeBackend  string `json:"analiz_assignee_backend"`
 	AnalizAssigneeFrontend string `json:"analiz_assignee_frontend"`
 	AnalizAssigneeMobile   string `json:"analiz_assignee_mobile"`
+	// DefaultAssignee is the agent a task created with no assignee goes to.
+	// Empty means nobody: the card then waits in todo until a human assigns it
+	// or an agent subscribed to that column picks it up, which is what a board
+	// with neither does today. An agent NAME, like the analiz settings above.
+	DefaultAssignee string `json:"default_assignee"`
 }
 
 type UpdateSettingsRequest struct {
@@ -38,6 +43,9 @@ type UpdateSettingsRequest struct {
 	DefaultLanguage          string `json:"default_language"`
 	PipelineContainerRuntime string `json:"pipeline_container_runtime"`
 	BoilerplateCatalogRepo   string `json:"boilerplate_catalog_repo"`
+	// DefaultAssignee follows the same leave-alone ("") / reset ("-") contract
+	// as the fields above.
+	DefaultAssignee string `json:"default_assignee"`
 }
 
 // UpdateAnalizAssignmentRequest changes which agent an analiz task for a given

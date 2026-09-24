@@ -293,6 +293,13 @@ export const settingsPages = {
     daily: "Daily",
   },
   board: {
+    defaultAssignee: {
+      title: "Default assignee",
+      description: "Who a task created without an assignee goes to. The board only starts work it can hand to someone: a card is dispatched to its assignee, or to an agent subscribed to its column — and the columns agents own are the review ones. Without a default, a task dropped in Todo waits there.",
+      label: "Agent",
+      nobody: "Nobody — I assign each task myself",
+      saved: "Default assignee saved",
+    },
     loadFailed: "Failed to load",
     invalidName: "Invalid name",
     duplicateName: "A column with this name already exists",

@@ -1233,6 +1233,8 @@ export interface AppSettings {
   analiz_assignee_backend?: string;
   analiz_assignee_frontend?: string;
   analiz_assignee_mobile?: string;
+  /** Agent name a task created with no assignee goes to; empty means nobody. */
+  default_assignee?: string;
 }
 
 export interface UpdateAnalizAssignmentRequest {
